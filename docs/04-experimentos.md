@@ -539,3 +539,744 @@ A planta agora tem separação clara entre modelo e controle. Controladores são
 - adição de novas malhas (PID, MPC, RL)
 - ativação/desativação individual de loops
 - alteração de setpoints e ganhos em runtime
+
+---
+
+## Experimento 12 — Baseline revalidação com nova infraestrutura
+
+### Observação
+
+O Exp 11 estabeleceu a arquitetura de controladores desacoplados e validou numericamente o comportamento da planta (CSV idêntico ao Exp 10). Desde então, a infraestrutura de execução foi substancialmente alterada:
+
+- **STEP_DELAY_MS=36** introduzido em `main.rs`: 100× real time (1h simulada = 36s de relógio)
+- **ACTIVE_IDV** via variável de ambiente em vez de hardcode em `main.rs`
+- **RECORD_CSV** na IHM: gravação de XMEAS + XMV via gRPC stream (não mais CSV interno do serviço Rust)
+- **IDV panel** na IHM: visualização em tempo real dos distúrbios ativos
+- Configuração via `docker-compose.yml` ou VS Code `launch.json` em vez de edição direta de código
+
+Nenhum desses componentes foi validado em conjunto. É possível que a aceleração de tempo (36ms/step) introduza diferenças numéricas, ou que o streaming gRPC perca amostras sob carga.
+
+### Hipótese
+
+A nova infraestrutura é transparente: o modelo físico da planta não foi alterado. Com `STEP_DELAY_MS=36`, `ACTIVE_IDV=` (vazio), e a IHM gravando CSV via gRPC, o comportamento dinâmico deve ser **numericamente equivalente** ao Exp 11. As trajetórias de pressão (~2680→2700 kPa), nível do reator (~69→73%), Sep/Stripper levels (~50%) e temperatura (~120°C) devem reproduzir o baseline do Exp 10/11 dentro da resolução da gravação.
+
+### Intervenção
+
+Configuração via `docker-compose.yml` em `tep-supervisor/local/`:
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    # ACTIVE_IDV não definido (vazio = sem distúrbio)
+
+tep-ihm:
+  environment:
+    - RECORD_CSV=true
+    - RECORD_CSV_PATH=/data/recording.csv
+    - ACTIVE_IDV=
+```
+
+Duração: 20h de tempo simulado (≈ 12 min de relógio a 100×). Snapshot inicial: `te_exp3_snapshot.toml`. Download do CSV ao final via `⬇ CSV` na IHM.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 13 — IDV(1): Step na razão A/C do feed combinado
+
+### Observação
+
+O Exp 12 valida o baseline com a nova infraestrutura. IDV(1) é o primeiro distúrbio a ser testado: altera a fração molar de A na alimentação A&C (stream 4) em um degrau permanente, mantendo B constante. A/C são os dois reagentes principais das reações 1 e 2 (A+C→G, A+C→H). Uma mudança na razão A/C desloca diretamente a estequiometria.
+
+### Hipótese
+
+Com o IDV(1) ativo, a fração de A no feed sobe permanentemente. Mais A disponível por mol de C → taxa de reação aumenta → maior geração de calor → temperatura do reator sobe (XMEAS(9)). A pressão do reator (XMEAS(7)) sobe em resposta ao aumento de temperatura e maior geração de gás. O controlador de pressão (purge valve XMV(6)) se abre para compensar — novo SS com purge maior que o baseline. Sep e Stripper Levels devem permanecer controlados. Efeito deve ser visível em XMEAS(23–28) (composição do reator) após o atraso do analisador (0.1h).
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=1
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=1
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 14 — IDV(2): Step na composição de B no feed (stream 4)
+
+### Observação
+
+IDV(2) aumenta em degrau a fração molar do inerte B na alimentação A&C. B não participa de nenhuma reação — só é removido pelo purge.
+
+### Hipótese
+
+Mais B no feed → acúmulo de B no loop de reciclo (visível em XMEAS(30) após 0.1h de atraso do analisador). A pressão do reator sobe porque B ocupa volume que antes era de reagentes. O controlador de pressão abre a purge valve (XMV(6)) para remover o excesso de inerte. Novo SS: pressão mais alta, purge maior, concentração de A e C reduzida (diluídos pelo B extra) → menor taxa de reação e menor produção. XMEAS(5) (recycle flow) deve aumentar. Efeito mais lento que IDV(1) porque B se acumula por difusão via reciclo.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=2
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=2
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 15 — IDV(3): Step na temperatura do D feed (stream 2)
+
+### Observação
+
+IDV(3) eleva em degrau a temperatura de entrada do D feed. D é alimentado como líquido; temperatura mais alta altera o enthalpy de entrada e a taxa de vaporização no reator.
+
+### Hipótese
+
+O efeito entálpico do D feed é de segunda ordem: D é alimentado em pequena fração (XMV(1) ≈ 63 kg/hr) e o reator tem grande capacidade térmica. Espera-se um pequeno aumento na temperatura do reator (XMEAS(9)), menor que IDV(4). A pressão pode subir levemente. Sep e Stripper Levels devem permanecer controlados. Este é o distúrbio de menor impacto esperado entre os step disturbances.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=3
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=3
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 16 — IDV(4): Step na temperatura de entrada do CW do reator (+5°C)
+
+### Observação
+
+IDV(4) eleva +5°C a temperatura de entrada da água de resfriamento do reator. Este distúrbio foi inadvertidamente ativo nos Exps 2 e 3, mas esses runs tinham outros fatores confundidores (cold start, IDV sem isolar). Agora será testado de forma isolada, a partir do baseline `te_exp3_snapshot.toml`, com a nova infraestrutura.
+
+### Hipótese
+
+Menor gradiente térmico no reator → remoção de calor reduzida → temperatura do reator sobe (XMEAS(9)) e com ela a pressão (XMEAS(7)). O controlador de pressão abre o purge (XMV(6)) para compensar a pressão. XMEAS(21) (CW outlet temp do reator) sobe de forma proporcional. Espera-se um novo SS estável, mas com temperatura e pressão do reator ~5°C / ~10–30 kPa acima do baseline, e purge levemente mais aberto.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=4
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=4
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 17 — IDV(5): Step na temperatura de entrada do CW do condensador (+5°C)
+
+### Observação
+
+IDV(5) eleva +5°C a temperatura de entrada da água de resfriamento do condensador (separador). Reduz a capacidade de condensação no separador.
+
+### Hipótese
+
+Com menos condensação no separador, mais vapor permanece no stream de reciclo → carga do compressor aumenta → XMEAS(20) (compressor work) sobe. A temperatura do separador (XMEAS(11)) sobe. XMEAS(22) (CW outlet temp do separador) sobe. O Sep Level pode cair levemente (menos líquido condensado). O controlador de Sep Level (XMV(7)) fecha levemente para compensar. Efeito mais localizado no loop de separação/reciclo do que no reator.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=5
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=5
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 18 — IDV(6): Step — perda total do A feed (stream 1)
+
+### Observação
+
+IDV(6) fecha completamente a válvula de A feed. Este é o distúrbio mais severo do grupo de steps: sem A disponível, a reação A+C→G e A+C→H para gradualmente.
+
+### Hipótese
+
+Com A feed zerado: taxa de reação cai → menos calor gerado → temperatura do reator desce. A composição do reator muda drasticamente (A desaparece, C acumula relativamente). O inventário total começa a cair (sem produto sendo gerado, o reciclo perde massa). Nível do reator cai (XMEAS(8)) sem controlador ativo para compensar. Pressão cai. Espera-se ISD por `Reactor Lv low (<10%)` em algum momento entre 2h e 10h simulados, a menos que o controlador de sep level consiga manter nível injetando liquido no stripper e retroalimentando.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=6
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=6
+```
+
+Duração: até ISD (ou 20h se não ocorrer). Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Registrar: houve ISD? Em que tempo? Qual o mecanismo?
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 19 — IDV(7): Step — queda de pressão no header de C (stream 4)
+
+### Observação
+
+IDV(7) reduz a pressão de fornecimento de C, diminuindo o fluxo de C para o reator de forma permanente. É um distúrbio severo, mas menos catastrófico que IDV(6) porque a redução é parcial.
+
+### Hipótese
+
+Com menos C no feed → estequiometria desequilibrada (excesso de A relativo) → reações mais lentas → menor geração de calor e produto. A pressão do reator cai. O controlador de pressão fecha a purge valve (XMV(6)) em resposta. XMEAS(5) (recycle flow) pode cair. Dependendo da intensidade da queda de pressão de C implementada no modelo, a planta pode ou encontrar um novo SS de operação reduzida ou derivar progressivamente até ISD.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=7
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=7
+```
+
+Duração: 20h simulados (ou até ISD). Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 20 — IDV(8): Aleatório — variação na composição A/B/C do feed (stream 4)
+
+### Observação
+
+IDV(8) introduz variação aleatória contínua na composição A/B/C da alimentação combinada. Diferente dos distúrbios step, não há novo ponto de operação estacionário — a perturbação é persistente e sem direção definida.
+
+### Hipótese
+
+As variáveis de composição do reator (XMEAS(23–28)) devem apresentar maior variância que o baseline. A pressão (XMEAS(7)) e temperatura (XMEAS(9)) devem oscilar mais. O controlador de pressão (purge valve) compensará as variações de pressão mas com lag. Dada a natureza randômica, os valores médios devem permanecer próximos do baseline em 20h — a planta não deriva para ISD, mas exibe maior variabilidade em todas as variáveis afetadas pela composição de feed.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=8
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=8
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Calcular variância de XMEAS(7), XMEAS(9), XMEAS(23–28) e comparar com baseline do Exp 12.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 21 — IDV(9): Aleatório — variação na temperatura do D feed (stream 2)
+
+### Observação
+
+IDV(9) introduz ruído aleatório contínuo na temperatura de entrada do D feed. O efeito entálpico de D é de segunda ordem (análogo ao IDV(3) como step).
+
+### Hipótese
+
+O efeito de IDV(9) deve ser mais brando que IDV(8): D feed representa uma pequena fração da alimentação total, e temperatura afeta apenas o enthalpy de entrada — não a composição estequiométrica. Espera-se aumento modesto na variância da temperatura do reator (XMEAS(9)) e quase nenhum efeito nas variáveis de composição ou pressão. A planta permanece estável.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=9
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=9
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 22 — IDV(10): Aleatório — variação na temperatura do C feed (stream 4)
+
+### Observação
+
+IDV(10) introduz ruído aleatório na temperatura de C na alimentação combinada A&C. C é um reagente principal, mas a perturbação é de temperatura (enthalpy), não de composição.
+
+### Hipótese
+
+Análogo ao IDV(9) mas para C, que tem maior participação molar no feed que D. Espera-se variância levemente maior que IDV(9) na temperatura do reator (XMEAS(9)) e pressão (XMEAS(7)), mas menor que IDV(8) (que perturba composição diretamente). A planta permanece estável. Comparar variâncias: IDV(9) < IDV(10) < IDV(8).
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=10
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=10
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 23 — IDV(11): Aleatório — variação na temperatura de entrada do CW do reator
+
+### Observação
+
+IDV(11) introduz flutuação contínua na temperatura de entrada da água de resfriamento do reator. Sem controlador de temperatura do reator no nosso setup (apenas controlador de pressão), a remoção de calor varia sem mecanismo de compensação direta.
+
+### Hipótese
+
+A temperatura do reator (XMEAS(9)) deve oscilar de forma correlacionada com o distúrbio — sem loop de temperatura fechado, não há rejeição ativa. XMEAS(21) (CW outlet temp do reator) deve oscilar com maior amplitude que no baseline. A pressão (XMEAS(7)) deve variar em consequência das oscilações térmicas, e o controlador de pressão tentará compensar via purge. Este distúrbio expõe a ausência de controlador de temperatura como ponto fraco da arquitetura atual.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=11
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=11
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 24 — IDV(12): Aleatório — variação na temperatura de entrada do CW do condensador
+
+### Observação
+
+IDV(12) é o análogo de IDV(11) para o condensador. Afeta a eficiência de separação no vaso separador.
+
+### Hipótese
+
+A temperatura do separador (XMEAS(11)) deve oscilar. XMEAS(22) (CW outlet temp do condensador) deve mostrar maior variância. O Sep Level (XMEAS(12)) pode oscilar levemente em consequência de variações na taxa de condensação. O controlador de Sep Level (XMV(7)) tentará compensar. Efeito menos severo que IDV(11) porque o loop de separação tem mais inércia térmica e não afeta diretamente a reação.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=12
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=12
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 25 — IDV(13): Deriva lenta — cinética de reação
+
+### Observação
+
+IDV(13) faz a constante de velocidade da reação derivar lentamente ao longo do tempo. Simula envelhecimento de catalisador ou mudança gradual de condições de processo. É o único IDV de natureza de drift, não step nem randômico.
+
+### Hipótese
+
+Em 20h simulados, a cinética deve ter derivado o suficiente para ser detectável. A temperatura do reator (XMEAS(9)) deve cair levemente conforme a reação desacelera (menos calor gerado). A pressão (XMEAS(7)) pode cair. A composição do reator (XMEAS(23–28)) deve mudar lentamente — mais reagentes (A, C) e menos produtos (G, H, F). O efeito é sutil e difícil de distinguir do drift natural de inventário (Exp 12); a comparação quantitativa com o baseline será essencial.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=13
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=13
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Comparar trajetórias de temperatura, pressão e XMEAS(23–28) com Exp 12 overlay.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 26 — IDV(14): Válvula travada — CW do reator (XMV(10))
+
+### Observação
+
+IDV(14) simula travamento da válvula de água de resfriamento do reator. A documentação do modelo (`05-disturbios.md`) indica que IDV(14) pode **não estar implementado** no `model.rs` atual — não foi encontrado canal de mapeamento correspondente durante análise do código em `teprob.f`.
+
+### Hipótese
+
+**Hipótese A (implementado):** A válvula XMV(10) trava na posição atual. O controlador de temperatura (se existisse) perderia autoridade. Com nossa planta sem controlador de temperatura, o efeito seria: CW flow fixo → temperatura do reator deriva conforme calor de reação muda. Possível ISD por temperatura alta.
+
+**Hipótese B (não implementado):** Ativar IDV(14) não produz nenhum efeito observável em relação ao baseline — as trajetórias de XMEAS e XMV são idênticas ao Exp 12. Este experimento serve primariamente para **verificar o status de implementação**.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=14
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=14
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Registrar se XMV(10) muda de comportamento em relação ao Exp 12.
+
+### Conclusão
+
+A ser preenchido após execução. Se Hipótese B confirmada, documentar IDV(14) como não implementado nesta versão do modelo.
+
+---
+
+## Experimento 27 — IDV(15): Válvula travada — CW do condensador (XMV(11))
+
+### Observação
+
+IDV(15) simula travamento da válvula de resfriamento do condensador. Assim como IDV(14), pode **não estar implementado** no modelo atual.
+
+### Hipótese
+
+**Hipótese A (implementado):** XMV(11) trava → capacidade de condensação fixa → Sep Level e temperatura do separador derivam com variações de carga.
+
+**Hipótese B (não implementado):** Nenhum efeito observável vs Exp 12. Experimento serve para verificar implementação.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=15
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=15
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução. Se Hipótese B confirmada, documentar IDV(15) como não implementado.
+
+---
+
+## Experimento 28 — IDV(16): Válvula travada — D feed (XMV(1))
+
+### Observação
+
+IDV(16) trava a válvula de alimentação de D. O mecanismo de implementação dos IDVs de válvula travada no `model.rs` atual foi identificado como possivelmente incompleto — IDV(16–18,20) podem usar mecanismo diferente do original FORTRAN.
+
+### Hipótese
+
+**Hipótese A (implementado corretamente):** XMV(1) trava no valor atual (~63%). D feed fica fixo. Como D é reagente (mas de menor impacto), a planta encontra novo SS com D feed constante — efeito moderado.
+
+**Hipótese B (implementação parcial):** O IDV produz um efeito, mas diferente do esperado (e.g., step no valor em vez de travamento). Observar comportamento de XMV(1) ao longo do tempo para diagnosticar o mecanismo real.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=16
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=16
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Observar comportamento de XMV(1) e XMEAS associados.
+
+### Conclusão
+
+A ser preenchido após execução. Documentar mecanismo observado.
+
+---
+
+## Experimento 29 — IDV(17): Válvula travada — A&C feed (XMV(4))
+
+### Observação
+
+IDV(17) trava a válvula principal de alimentação combinada A&C — os dois reagentes principais. É o travamento de válvula de maior impacto potencial.
+
+### Hipótese
+
+**Hipótese A (implementado):** XMV(4) trava. Com A e C fixos, o controlador de pressão (que não manipula XMV(4)) não pode compensar. Dependendo do valor travado (acima ou abaixo do nominal), a planta pode acumular ou perder massa progressivamente, eventualmente atingindo ISD.
+
+**Hipótese B (implementação parcial):** Comportamento diferente do travamento. Monitorar XMV(4) para diagnóstico.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=17
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=17
+```
+
+Duração: 20h simulados (ou até ISD). Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Registrar: XMV(4) mostra travamento? Houve ISD?
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 30 — IDV(18): Válvula travada — A feed (XMV(3))
+
+### Observação
+
+IDV(18) trava a válvula de A feed específica. A feed é separado do feed combinado A&C; XMV(3) controla a entrada de A puro no reator.
+
+### Hipótese
+
+**Hipótese A (implementado):** XMV(3) trava. Com A feed fixo e sem controlador de composição de A, a estequiometria do reator deriva. Se A feed travado abaixo do nominal → menos A → taxa de reação cai gradualmente → comportamento similar a IDV(6) mas mais lento.
+
+**Hipótese B (implementação parcial):** Comportamento anômalo. Monitorar XMV(3) explicitamente.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=18
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=18
+```
+
+Duração: 20h simulados (ou até ISD). Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução.
+
+---
+
+## Experimento 31 — IDV(19): Válvula travada — reciclo do compressor (XMV(5))
+
+### Observação
+
+IDV(19) trava a válvula de reciclo do compressor. Assim como IDV(14) e IDV(15), pode **não estar implementado** no modelo atual — não foi encontrado canal de mapeamento correspondente durante análise do código.
+
+### Hipótese
+
+**Hipótese A (implementado):** XMV(5) trava → pressão de sucção do compressor fica fixa → XMEAS(5) (recycle flow) e XMEAS(20) (compressor work) derivam conforme as condições de processo mudam.
+
+**Hipótese B (não implementado):** Nenhum efeito observável vs Exp 12.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=19
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=19
+```
+
+Duração: 20h simulados. Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução.
+
+### Conclusão
+
+A ser preenchido após execução. Se Hipótese B confirmada, documentar IDV(19) como não implementado.
+
+---
+
+## Experimento 32 — IDV(20): Válvula travada — produto do stripper (XMV(8))
+
+### Observação
+
+IDV(20) trava a válvula de produto final do stripper. A remoção de produto G/H fica fixa, independente da taxa de produção no reator.
+
+### Hipótese
+
+**Hipótese A (implementado):** XMV(8) trava no valor atual. O Stripper Level (XMEAS(15)) perde o controlador e deriva. Com produto acumulando no stripper → nível sobe → se atingir 100% → ISD por high level. Alternativamente, se XMV(8) travado acima do nominal → stripper drena → low level → ISD. O controlador atual de Stripper Level usa XMV(8) como variável manipulada — com ela travada, o controlador perde autoridade completamente.
+
+**Hipótese B (implementação parcial):** XMV(8) mostra comportamento anômalo em vez de travamento real. Monitorar explicitamente.
+
+### Intervenção
+
+```yaml
+te-plant:
+  environment:
+    - STEP_DELAY_MS=36
+    - ACTIVE_IDV=20
+tep-ihm:
+  environment:
+    - ACTIVE_IDV=20
+```
+
+Duração: 20h simulados (ou até ISD). Snapshot inicial: `te_exp3_snapshot.toml`.
+
+### Resultado
+
+A ser preenchido após execução. Registrar comportamento de XMV(8), XMEAS(15), e se houve ISD.
+
+### Conclusão
+
+A ser preenchido após execução.
