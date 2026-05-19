@@ -19,6 +19,12 @@ service PlantService {
 
   // Escrita: atualiza parâmetros de um controlador existente
   rpc UpdateController(UpdateControllerRequest) returns (UpdateControllerResponse);
+
+  // Escrita: ativa/desativa distúrbios em tempo real (sem reiniciar)
+  rpc UpdateDisturbances(UpdateDisturbancesRequest) returns (UpdateDisturbancesResponse);
+
+  // Escrita: controla simulação (pause, resume, reset)
+  rpc ControlSimulation(ControlSimulationRequest) returns (ControlSimulationResponse);
 }
 
 // ─── Métricas e status ─────────────────────────────────────────────────────────
@@ -89,4 +95,33 @@ message UpdateControllerResponse {
   bool success = 1;
   string message = 2;
   ControllerInfo controller = 3;
+}
+
+// ─── Disturbance Control ───────────────────────────────────────────────────────
+
+message UpdateDisturbancesRequest {
+  repeated uint32 active_idv = 1;  // Lista de IDVs a ativar (1-20)
+}
+
+message UpdateDisturbancesResponse {
+  bool success = 1;
+  string message = 2;
+  repeated uint32 active_idv = 3;  // Estado resultante
+}
+
+// ─── Simulation Control ───────────────────────────────────────────────────────
+
+message ControlSimulationRequest {
+  enum Action {
+    PAUSE = 0;
+    RESUME = 1;
+    RESET = 2;  // Reset ao snapshot inicial, sem sair do loop
+  }
+  Action action = 1;
+}
+
+message ControlSimulationResponse {
+  bool success = 1;
+  string message = 2;
+  bool paused = 3;  // Estado atual da simulação
 }

@@ -180,4 +180,75 @@ impl PlantService for PlantServiceImpl {
             controller: Some(pb_info),
         }))
     }
+
+    async fn update_disturbances(
+        &self,
+        request: Request<UpdateDisturbancesRequest>,
+    ) -> Result<Response<UpdateDisturbancesResponse>, Status> {
+        let req = request.into_inner();
+        let mut state = self.shared.lock().unwrap();
+
+        // Convert u32 to usize and validate
+        let new_active: Vec<usize> = req.active_idv
+            .iter()
+            .filter_map(|&v| {
+                let n = v as usize;
+                if n >= 1 && n <= 20 {
+                    Some(n)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        state.active_idv = new_active.clone();
+
+        Ok(Response::new(UpdateDisturbancesResponse {
+            success: true,
+            message: format!("disturbances updated: {:?}", new_active),
+            active_idv: new_active.iter().map(|&v| v as u32).collect(),
+        }))
+    }
+
+    async fn control_simulation(
+        &self,
+        request: Request<ControlSimulationRequest>,
+    ) -> Result<Response<ControlSimulationResponse>, Status> {
+        let req = request.into_inner();
+        let mut state = self.shared.lock().unwrap();
+
+        // Action enum values: 0=PAUSE, 1=RESUME, 2=RESET
+        match req.action {
+            0 => {  // PAUSE
+                state.paused = true;
+                Ok(Response::new(ControlSimulationResponse {
+                    success: true,
+                    message: "simulation paused".to_string(),
+                    paused: true,
+                }))
+            }
+            1 => {  // RESUME
+                state.paused = false;
+                Ok(Response::new(ControlSimulationResponse {
+                    success: true,
+                    message: "simulation resumed".to_string(),
+                    paused: false,
+                }))
+            }
+            2 => {  // RESET
+                Ok(Response::new(ControlSimulationResponse {
+                    success: true,
+                    message: "reset signal sent".to_string(),
+                    paused: state.paused,
+                }))
+            }
+            _ => {
+                Ok(Response::new(ControlSimulationResponse {
+                    success: false,
+                    message: "invalid action".to_string(),
+                    paused: state.paused,
+                }))
+            }
+        }
+    }
 }

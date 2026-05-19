@@ -79,6 +79,31 @@ pub fn run(config: Config, shared: SharedPlant) {
     let mut clean_exit    = false;
 
     loop {
+        // Check pause state and update disturbances from shared state
+        {
+            let state = shared.lock().unwrap();
+
+            // If paused, skip simulation step but still serve gRPC
+            if state.paused {
+                if config.real_time {
+                    std::thread::sleep(std::time::Duration::from_secs_f64(config.step_delay_secs));
+                }
+                continue;
+            }
+
+            // Update disturbances from shared state (allows runtime toggling)
+            if !state.active_idv.is_empty() && disturbances_restored {
+                for i in 0..plant.bus.inputs.dv.len() {
+                    plant.bus.inputs.dv[i] = 0.0;
+                }
+                for &idv in &state.active_idv {
+                    if idv >= 1 && idv <= plant.bus.inputs.dv.len() {
+                        plant.bus.inputs.dv[idv - 1] = 1.0;
+                    }
+                }
+            }
+        }
+
         if !isd_active {
             plant.step(config.dt);
             t_simulation   += config.dt;

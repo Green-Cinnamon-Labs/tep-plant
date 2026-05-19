@@ -26,6 +26,7 @@ pub struct SharedState {
     pub bank: ControllerBank,
     pub metrics: MetricsSnapshot,
     pub active_idv: Vec<usize>,
+    pub paused: bool,
 }
 
 impl SharedState {
@@ -41,6 +42,7 @@ impl SharedState {
                 isd_active: false,
             },
             active_idv: Vec::new(),
+            paused: false,
         }
     }
 }
