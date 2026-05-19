@@ -10,25 +10,51 @@ A camada de controle é separada do modelo da planta. O runtime não contém ló
 
 ### Arquitetura
 
-```
-main.rs                          runtime.rs (sim thread)
-┌──────────────────────┐         ┌──────────────────────────┐
-│ cria ControllerBank  │         │ loop {                   │
-│ adiciona controllers │         │   plant.step(dt)         │
-│ cria SharedState     │───────► │   ramp_logic()           │
-│ spawna sim thread    │         │   lock(shared) {         │
-│ inicia gRPC :50051   │         │     apply_dv_commands()  │
-└──────────────────────┘         │     bank.step(xmeas,xmv) │
-                                 │     write_metrics()      │
-       gRPC Server (tonic)       │   }                      │
-       ┌──────────────────┐      │ }                        │
-       │ StreamMetrics()  │◄────►└──────────────────────────┘
-       │ ListControllers()│        Arc<Mutex<SharedState>>
-       │ UpdateController()│
-       │ AddController()  │
-       │ RemoveController()│
-       │ SetDisturbance() │
-       └──────────────────┘
+```mermaid
+flowchart LR
+    subgraph MAIN["main.rs"]
+        M1["cria ControllerBank"]
+        M2["adiciona controllers"]
+        M3["cria SharedState"]
+        M4["spawna sim thread"]
+        M5["inicia gRPC :50051"]
+
+        M1 --> M2 --> M3 --> M4 --> M5
+    end
+
+    subgraph RUNTIME["runtime.rs — sim thread"]
+        R0{{"loop"}}
+        R1["plant.step(dt)"]
+        R2["ramp_logic()"]
+
+        subgraph LOCK["lock(shared)"]
+            R3["apply_dv_commands()"]
+            R4["bank.step(xmeas, xmv)"]
+            R5["write_metrics()"]
+
+            R3 --> R4 --> R5
+        end
+
+        R0 --> R1 --> R2 --> R3
+        R5 --> R0
+    end
+
+    subgraph GRPC["gRPC Server — tonic"]
+        G1["StreamMetrics()"]
+        G2["ListControllers()"]
+        G3["UpdateController()"]
+        G4["AddController()"]
+        G5["RemoveController()"]
+        G6["SetDisturbance()"]
+    end
+
+    SHARED[("Arc&lt;Mutex&lt;SharedState&gt;&gt;")]
+
+    M4 --> R0
+    M3 --> SHARED
+
+    LOCK <--> SHARED
+    GRPC <--> SHARED
 ```
 
 Detalhes da API gRPC em [07-grpc-architecture.md](07-grpc-architecture.md).
