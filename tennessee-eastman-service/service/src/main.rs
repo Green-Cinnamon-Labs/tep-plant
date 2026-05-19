@@ -33,23 +33,15 @@ async fn main() {
     let real_time     = step_delay_ms > 0;
     let step_delay_secs = step_delay_ms as f64 / 1000.0;
 
-    // ── Env var: ACTIVE_IDV ───────────────────────────────────────────────────
-    // Comma-separated list of IDV numbers to activate, e.g. "4" or "1,4".
-    let active_idv: Vec<usize> = std::env::var("ACTIVE_IDV")
-        .unwrap_or_default()
-        .split(',')
-        .filter_map(|s| s.trim().parse().ok())
-        .collect();
-
     if real_time {
         eprintln!("Simulation speed: {:.0}x real time (STEP_DELAY_MS={})",
             3.6 / step_delay_secs, step_delay_ms);
     } else {
         eprintln!("Simulation speed: maximum CPU (STEP_DELAY_MS not set)");
     }
-    if !active_idv.is_empty() {
-        eprintln!("Active disturbances: IDV {:?}", active_idv);
-    }
+
+    // Disturbances are now controlled via gRPC UpdateDisturbances endpoint (no startup config)
+    let active_idv: Vec<usize> = vec![];
 
     let config = Config {
         dt: 0.001,

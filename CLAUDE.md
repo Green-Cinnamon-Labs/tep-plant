@@ -36,7 +36,7 @@ Knows: loop, clock, interfaces, gRPC. Does NOT know plant internals.
 - **Controllers run after `plant.step(dt)`** — they read `xmeas` from the just-completed tick and write into `mv` which the next tick will consume. See `docs/01-premissas.md`.
 - **ISD (Incipient Shutdown)** — detected when `deriv_norm == 0.0` and any alarm is active. Simulation loop freezes; gRPC keeps serving the last snapshot.
 - **Snapshots** — TOML files under `cases/` (e.g. `te_exp3_snapshot.toml`) provide warm-start initial conditions. Written automatically on clean exit if `snapshot_path` is set in `Config`.
-- **Disturbances** — set via `ACTIVE_IDV` env var (1-based index, comma-separated). Held off during cold-start ramp, then enabled when ramp completes.
+- **Disturbances** — controlled at runtime via `UpdateDisturbances` gRPC method exposed by the service. Initial state is empty (no disturbances). Held off during cold-start ramp, then enabled when ramp completes (or when gRPC call is made).
 
 ## Adding a New Controller
 
