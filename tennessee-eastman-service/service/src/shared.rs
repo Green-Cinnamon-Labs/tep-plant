@@ -31,6 +31,8 @@ pub struct SharedState {
     pub paused: bool,
     /// Simulation speed factor. 0.0 = max speed; 1.0 = real-time; N = N× real-time.
     pub speed_factor: f64,
+    /// Set to true by gRPC RESET; runtime resets state and clears this flag.
+    pub reset_requested: bool,
 }
 
 impl SharedState {
@@ -49,6 +51,7 @@ impl SharedState {
             idv_magnitudes: HashMap::new(),
             paused: false,
             speed_factor: 1.0,
+            reset_requested: false,
         }
     }
 }

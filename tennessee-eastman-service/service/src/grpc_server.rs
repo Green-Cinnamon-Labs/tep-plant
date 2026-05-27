@@ -243,9 +243,11 @@ impl PlantService for PlantServiceImpl {
                 }))
             }
             2 => {  // RESET
+                state.reset_requested = true;
+                state.metrics.isd_active = false;
                 Ok(Response::new(ControlSimulationResponse {
                     success: true,
-                    message: "reset signal sent".to_string(),
+                    message: "reset requested".to_string(),
                     paused: state.paused,
                 }))
             }

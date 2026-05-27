@@ -30,11 +30,11 @@ pub fn run(config: Config, shared: SharedPlant) {
     }
 
     // ── Cold start ─────────────────────────────────────────────────────────────
-    let nominal_mv: Vec<f64> = plant.bus.inputs.mv.clone();
+    let mut nominal_mv: Vec<f64> = plant.bus.inputs.mv.clone();
     let ramp_duration = config.ramp_duration;
 
     // Disable disturbances during ramp
-    let saved_dv = plant.bus.inputs.dv.clone();
+    let mut saved_dv = plant.bus.inputs.dv.clone();
     for v in plant.bus.inputs.dv.iter_mut() {
         *v = 0.0;
     }
@@ -79,11 +79,33 @@ pub fn run(config: Config, shared: SharedPlant) {
     let mut clean_exit    = false;
 
     loop {
-        // Read control state (fast lock): pause + speed factor
-        let (is_paused, speed_factor) = {
-            let s = shared.lock().unwrap();
-            (s.paused, s.speed_factor)
+        // Read control state (fast lock): pause + speed + reset
+        let (is_paused, speed_factor, do_reset) = {
+            let mut s = shared.lock().unwrap();
+            let r = s.reset_requested;
+            if r { s.reset_requested = false; s.metrics.isd_active = false; }
+            (s.paused, s.speed_factor, r)
         };
+
+        if do_reset {
+            let new_resolved = resolve(&config);
+            plant = Plant::with_state_values(
+                &new_resolved.initial_state,
+                new_resolved.model,
+                Params::default(),
+                new_resolved.integrator,
+            );
+            nominal_mv = plant.bus.inputs.mv.clone();
+            saved_dv = plant.bus.inputs.dv.clone();
+            for v in plant.bus.inputs.dv.iter_mut() { *v = 0.0; }
+            for i in 0..4 { plant.bus.inputs.mv[i] = 0.0; }
+            t_simulation = 0.0;
+            t_operational = 0.0;
+            isd_active = false;
+            disturbances_restored = false;
+            eprintln!("[runtime] simulation reset to t=0");
+            continue;
+        }
 
         if is_paused {
             // While paused: idle at the configured rate to keep gRPC responsive
