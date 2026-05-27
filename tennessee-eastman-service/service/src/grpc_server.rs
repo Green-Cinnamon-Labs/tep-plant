@@ -203,6 +203,13 @@ impl PlantService for PlantServiceImpl {
 
         state.active_idv = new_active.clone();
 
+        for (&idv_num, &mag) in &req.idv_magnitudes {
+            let idx = idv_num as usize;
+            if idx >= 1 && idx <= 20 {
+                state.idv_magnitudes.insert(idx, mag as f64);
+            }
+        }
+
         Ok(Response::new(UpdateDisturbancesResponse {
             success: true,
             message: format!("disturbances updated: {:?}", new_active),
@@ -250,5 +257,18 @@ impl PlantService for PlantServiceImpl {
                 }))
             }
         }
+    }
+
+    async fn set_speed(
+        &self,
+        request: Request<SetSpeedRequest>,
+    ) -> Result<Response<SetSpeedResponse>, Status> {
+        let factor = request.into_inner().factor;
+        let effective = if factor < 0.0 { 0.0 } else { factor as f64 };
+        self.shared.lock().unwrap().speed_factor = effective;
+        Ok(Response::new(SetSpeedResponse {
+            success: true,
+            factor: effective as f32,
+        }))
     }
 }

@@ -2,6 +2,20 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Planta: 1x (tempo real, 3.6 s/step)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/tennessee-eastman-service/target/debug/te_service.exe",
+      "args": ["--headless"],
+      "cwd": "${workspaceFolder}/tennessee-eastman-service",
+      "preLaunchTask": "cargo build",
+      "sourceLanguages": ["rust"],
+            "env": {
+        "STEP_DELAY_MS": "3600",
+        "ACTIVE_IDV": ""
+      }
+    },
+    {
       "name": "Planta: baseline (100x, sem distúrbios)",
       "type": "lldb",
       "request": "launch",

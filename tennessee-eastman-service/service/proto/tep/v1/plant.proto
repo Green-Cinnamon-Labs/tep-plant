@@ -25,6 +25,9 @@ service PlantService {
 
   // Escrita: controla simulação (pause, resume, reset)
   rpc ControlSimulation(ControlSimulationRequest) returns (ControlSimulationResponse);
+
+  // Escrita: ajusta velocidade de simulação (0.0 = max, 1.0 = real-time, 2.0 = 2× real-time)
+  rpc SetSpeed(SetSpeedRequest) returns (SetSpeedResponse);
 }
 
 // ─── Métricas e status ─────────────────────────────────────────────────────────
@@ -100,7 +103,8 @@ message UpdateControllerResponse {
 // ─── Disturbance Control ───────────────────────────────────────────────────────
 
 message UpdateDisturbancesRequest {
-  repeated uint32 active_idv = 1;  // Lista de IDVs a ativar (1-20)
+  repeated uint32 active_idv = 1;                // Lista de IDVs a ativar (1-20)
+  map<uint32, float> idv_magnitudes = 2;         // Magnitude por IDV (ex: {4: 10.0} para +10°C)
 }
 
 message UpdateDisturbancesResponse {
@@ -124,4 +128,15 @@ message ControlSimulationResponse {
   bool success = 1;
   string message = 2;
   bool paused = 3;  // Estado atual da simulação
+}
+
+// ─── Speed Control ────────────────────────────────────────────────────────────
+
+message SetSpeedRequest {
+  float factor = 1;  // 0.0 = max speed, 1.0 = real-time, N = N× real-time
+}
+
+message SetSpeedResponse {
+  bool success = 1;
+  float factor = 2;  // Factor efetivo aplicado
 }

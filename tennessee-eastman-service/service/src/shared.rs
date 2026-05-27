@@ -1,6 +1,7 @@
 // shared.rs — bridge between simulation thread and gRPC server
 
 use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
 use crate::controllers::ControllerBank;
 
 /// Snapshot of plant metrics written by the simulation thread each tick.
@@ -26,7 +27,10 @@ pub struct SharedState {
     pub bank: ControllerBank,
     pub metrics: MetricsSnapshot,
     pub active_idv: Vec<usize>,
+    pub idv_magnitudes: HashMap<usize, f64>,
     pub paused: bool,
+    /// Simulation speed factor. 0.0 = max speed; 1.0 = real-time; N = N× real-time.
+    pub speed_factor: f64,
 }
 
 impl SharedState {
@@ -42,7 +46,9 @@ impl SharedState {
                 isd_active: false,
             },
             active_idv: Vec::new(),
+            idv_magnitudes: HashMap::new(),
             paused: false,
+            speed_factor: 1.0,
         }
     }
 }

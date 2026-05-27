@@ -81,8 +81,9 @@ fn xst_col(xst: &[[f64; 13]; 8], stream: usize) -> [f64; 8] {
 pub struct TennesseeEastmanModel {
     pub constants:   TepConstants,
     pub disturbance: TepDisturbanceState,
-    pub xmv:         [f64; 12],  // valve commands (external)
-    pub idv:         [i32; 20],  // disturbance flags (external)
+    pub xmv:          [f64; 12],  // valve commands (external)
+    pub idv:          [i32; 20],  // disturbance flags (external)
+    pub idv_step_mag: [f64; 20],  // magnitude por IDV step (°C ou fração); default 5.0 para IDV 3/4/5
     pub time:        f64,        // current simulation time (hours)
     // Sampler state (TGAS, TPROD, XDEL from TEPROC)
     tgas:  f64,
@@ -109,6 +110,13 @@ impl TennesseeEastmanModel {
             disturbance: TepDisturbanceState::new(),
             xmv:         flat[38..50].try_into().unwrap(),
             idv:         [0; 20],
+            idv_step_mag: {
+                let mut m = [1.0_f64; 20];
+                m[2] = 5.0; // IDV(3): D feed temperature +5°C
+                m[3] = 5.0; // IDV(4): reactor CW inlet +5°C
+                m[4] = 5.0; // IDV(5): condenser CW inlet +5°C
+                m
+            },
             time:        0.0,
             tgas:        0.1,
             tprod:       0.25,
@@ -151,6 +159,12 @@ impl DynamicModel for TennesseeEastmanModel {
 
     fn advance_time(&mut self, dt: f64) {
         self.time += dt;
+    }
+
+    fn set_idv_step_mag(&mut self, idx: usize, mag: f64) {
+        if idx < 20 {
+            self.idv_step_mag[idx] = mag;
+        }
     }
 
     fn alarms(&self) -> Vec<Alarm> {
@@ -258,10 +272,10 @@ impl DynamicModel for TennesseeEastmanModel {
         self.xst[1][3] = eval_disturbance(1, time, ds) + idv[1] as f64 * 0.005;
         self.xst[2][3] = 1.0 - self.xst[0][3] - self.xst[1][3];
 
-        self.tst[0]  = eval_disturbance(2, time, ds) + idv[2] as f64 * 5.0;
+        self.tst[0]  = eval_disturbance(2, time, ds) + idv[2] as f64 * self.idv_step_mag[2];
         self.tst[3]  = eval_disturbance(3, time, ds);
-        self.tcwr    = eval_disturbance(4, time, ds) + idv[3] as f64 * 5.0;
-        self.tcws    = eval_disturbance(5, time, ds) + idv[4] as f64 * 5.0;
+        self.tcwr    = eval_disturbance(4, time, ds) + idv[3] as f64 * self.idv_step_mag[3];
+        self.tcws    = eval_disturbance(5, time, ds) + idv[4] as f64 * self.idv_step_mag[4];
         self.r1f     = eval_disturbance(6, time, ds);
         self.r2f     = eval_disturbance(7, time, ds);
 
@@ -298,7 +312,7 @@ impl DynamicModel for TennesseeEastmanModel {
         let ets = yy[17];
         let etc = yy[26];
         let etv = yy[35];
-        let twr = yy[36];
+        let _twr = yy[36]; // historical state; twr recomputed quasi-statically in Block 32
         let tws = yy[37];
 
         // Valve positions (states 39-50, idx 38-49)
@@ -640,6 +654,15 @@ impl DynamicModel for TennesseeEastmanModel {
             0.025 * vlr / 7.8 - 0.25
         };
         let uar = uarlev * (-0.5 * agsp * agsp + 2.75 * agsp - 2.5) * 855490e-6;
+        // Quasi-static twr: heat balance equilibrium (IDV(4) changes tcwr → twr → qur → TCR)
+        // cpcw_eff=0.00942 calibrated to yield twr≈94.6°C at nominal (tcwr=38.5, tcr=120, fcwr=41.1, uar=0.856)
+        let fcwr = vpos[9] * VRNG[9] * 0.001;
+        let cw_cap_r = fcwr * 0.00942_f64 + uar;
+        let twr = if cw_cap_r > 1e-12 {
+            (fcwr * 0.00942_f64 * self.tcwr + uar * tcr) / cw_cap_r
+        } else {
+            yy[36]
+        };
         let qur = uar * (twr - tcr) * (1.0 - 0.35 * eval_disturbance(9, time, ds));
 
         // --------------------------------------------------------
@@ -778,7 +801,7 @@ impl DynamicModel for TennesseeEastmanModel {
                + hst[2] * ftm[2] + hst[4] * ftm[4]
                + hst[8] * ftm[8] - hst[5] * ftm[5];
 
-        // Cooling water temperatures: kept constant (YP(37)/YP(38) never set in FORTRAN TEFUNC)
+        // twr resolved quasi-statically in Block 32; tws kept at snapshot value
         yp[36] = 0.0;
         yp[37] = 0.0;
 

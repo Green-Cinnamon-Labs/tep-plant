@@ -79,26 +79,37 @@ pub fn run(config: Config, shared: SharedPlant) {
     let mut clean_exit    = false;
 
     loop {
-        // Check pause state and update disturbances from shared state
+        // Read control state (fast lock): pause + speed factor
+        let (is_paused, speed_factor) = {
+            let s = shared.lock().unwrap();
+            (s.paused, s.speed_factor)
+        };
+
+        if is_paused {
+            // While paused: idle at the configured rate to keep gRPC responsive
+            let pause_delay = if speed_factor > 0.0 { (3.6_f64 / speed_factor).min(0.1) } else { 0.05 };
+            std::thread::sleep(std::time::Duration::from_secs_f64(pause_delay));
+            continue;
+        }
+
+        // Sync disturbances from shared state (allows runtime toggling)
         {
             let state = shared.lock().unwrap();
 
-            // If paused, skip simulation step but still serve gRPC
-            if state.paused {
-                if config.real_time {
-                    std::thread::sleep(std::time::Duration::from_secs_f64(config.step_delay_secs));
-                }
-                continue;
-            }
-
-            // Update disturbances from shared state (allows runtime toggling)
-            if !state.active_idv.is_empty() && disturbances_restored {
+            if disturbances_restored {
                 for i in 0..plant.bus.inputs.dv.len() {
                     plant.bus.inputs.dv[i] = 0.0;
                 }
                 for &idv in &state.active_idv {
                     if idv >= 1 && idv <= plant.bus.inputs.dv.len() {
                         plant.bus.inputs.dv[idv - 1] = 1.0;
+                    }
+                }
+                // Sync configurable step magnitudes (IDV 3, 4, 5)
+                for &idx in &[2usize, 3, 4] {
+                    let idv_num = idx + 1;
+                    if let Some(&mag) = state.idv_magnitudes.get(&idv_num) {
+                        plant.model.set_idv_step_mag(idx, mag);
                     }
                 }
             }
@@ -212,13 +223,18 @@ pub fn run(config: Config, shared: SharedPlant) {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
 
-            if config.real_time {
-                std::thread::sleep(std::time::Duration::from_secs_f64(config.step_delay_secs));
+            // Speed-controlled delay in ISD state
+            let isd_delay = if speed_factor > 0.0 { 3.6_f64 / speed_factor } else { 0.0 };
+            if isd_delay > 0.0 {
+                std::thread::sleep(std::time::Duration::from_secs_f64(isd_delay));
             }
         }
 
-        if !isd_active && config.real_time {
-            std::thread::sleep(std::time::Duration::from_secs_f64(config.step_delay_secs));
+        if !isd_active {
+            let step_delay = if speed_factor > 0.0 { 3.6_f64 / speed_factor } else { 0.0 };
+            if step_delay > 0.0 {
+                std::thread::sleep(std::time::Duration::from_secs_f64(step_delay));
+            }
         }
     }
 

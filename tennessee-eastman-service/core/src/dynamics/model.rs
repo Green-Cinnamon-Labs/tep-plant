@@ -10,6 +10,7 @@ pub trait DynamicModel {
     fn set_inputs(&mut self, mv: &[f64], dv: &[f64]) { let _ = (mv, dv); }
     fn advance_time(&mut self, dt: f64) { let _ = dt; }
     fn alarms(&self) -> Vec<Alarm> { vec![] }
+    fn set_idv_step_mag(&mut self, idx: usize, mag: f64) { let _ = (idx, mag); }
 }
 
 impl DynamicModel for Box<dyn DynamicModel> {
@@ -30,6 +31,9 @@ impl DynamicModel for Box<dyn DynamicModel> {
     }
     fn alarms(&self) -> Vec<Alarm> {
         self.as_ref().alarms()
+    }
+    fn set_idv_step_mag(&mut self, idx: usize, mag: f64) {
+        self.as_mut().set_idv_step_mag(idx, mag);
     }
 }
 
