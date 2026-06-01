@@ -654,15 +654,20 @@ impl DynamicModel for TennesseeEastmanModel {
             0.025 * vlr / 7.8 - 0.25
         };
         let uar = uarlev * (-0.5 * agsp * agsp + 2.75 * agsp - 2.5) * 855490e-6;
-        // Quasi-static twr: heat balance equilibrium (IDV(4) changes tcwr → twr → qur → TCR)
-        // cpcw_eff=0.00942 calibrated to yield twr≈94.6°C at nominal (tcwr=38.5, tcr=120, fcwr=41.1, uar=0.856)
-        let fcwr = vpos[9] * VRNG[9] * 0.001;
-        let cw_cap_r = fcwr * 0.00942_f64 + uar;
-        let twr = if cw_cap_r > 1e-12 {
-            (fcwr * 0.00942_f64 * self.tcwr + uar * tcr) / cw_cap_r
-        } else {
-            yy[36]
-        };
+        // 2026-06-01: comentado para isolar hipótese de instabilidade no cold-start (Exp 14).
+        // O modelo quasi-estático abaixo fazia twr responder a tcwr e tcr, mas quando tcr cai
+        // abaixo de ~67°C o balanço produz twr < tcr → QUR < 0 (trocador "aquece" o reator),
+        // comportamento ausente no FORTRAN original onde YP(37) nunca é atribuído e TWR fica
+        // congelado em yy[36] = 94.6°C. Reativar e comparar após confirmar resultado do teste.
+        //
+        // let fcwr = vpos[9] * VRNG[9] * 0.001;
+        // let cw_cap_r = fcwr * 0.00942_f64 + uar;
+        // let twr = if cw_cap_r > 1e-12 {
+        //     (fcwr * 0.00942_f64 * self.tcwr + uar * tcr) / cw_cap_r
+        // } else {
+        //     yy[36]
+        // };
+        let twr = yy[36]; // fiel ao FORTRAN original: TWR = YY(37), derivada nula
         let qur = uar * (twr - tcr) * (1.0 - 0.35 * eval_disturbance(9, time, ds));
 
         // --------------------------------------------------------
