@@ -268,12 +268,27 @@ impl DynamicModel for TennesseeEastmanModel {
         // --------------------------------------------------------
         // Block 12: update feed compositions and temperatures
         // --------------------------------------------------------
+
+        // Fração molar de A no stream 4 (A/C feed).
+        // IDV(1) reduz A; IDV(2) ajusta A para manter razão A/C quando B muda.
         self.xst[0][3] = eval_disturbance(0, time, ds) - idv[0] as f64 * 0.03 - idv[1] as f64 * 2.43719e-3;
+
+        // Fração molar de B no stream 4.
+        // IDV(2) aumenta B; IDV(1) mantém B constante.
         self.xst[1][3] = eval_disturbance(1, time, ds) + idv[1] as f64 * 0.005;
+
+        // Fração molar de C no stream 4.
+        // Calculada por fechamento: C = 1 - A - B.
         self.xst[2][3] = 1.0 - self.xst[0][3] - self.xst[1][3];
 
+        // Temperatura do feed D — stream 2.
+        // IDV(3) aplica degrau na temperatura dessa corrente.
         self.tst[0]  = eval_disturbance(2, time, ds) + idv[2] as f64 * self.idv_step_mag[2];
+
+        // Temperatura do feed E — stream 3.
+        // Sem IDV step direto aqui; apenas valor base/variação definida por eval_disturbance(3).
         self.tst[3]  = eval_disturbance(3, time, ds);
+
         self.tcwr    = eval_disturbance(4, time, ds) + idv[3] as f64 * self.idv_step_mag[3];
         self.tcws    = eval_disturbance(5, time, ds) + idv[4] as f64 * self.idv_step_mag[4];
         self.r1f     = eval_disturbance(6, time, ds);
