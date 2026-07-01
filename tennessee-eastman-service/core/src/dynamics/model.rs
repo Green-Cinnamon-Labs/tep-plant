@@ -1,16 +1,28 @@
 // core/src/dynamics/model.rs
 
-use crate::state::State;
 use crate::snapshot::Alarm;
+use crate::state::State;
 
 pub trait DynamicModel {
     fn derivatives(&mut self, state: &State) -> Vec<f64>;
-    fn measurements(&self) -> &[f64] { &[] }
-    fn get_mv(&self) -> Vec<f64> { vec![] }
-    fn set_inputs(&mut self, mv: &[f64], dv: &[f64]) { let _ = (mv, dv); }
-    fn advance_time(&mut self, dt: f64) { let _ = dt; }
-    fn alarms(&self) -> Vec<Alarm> { vec![] }
-    fn set_idv_step_mag(&mut self, idx: usize, mag: f64) { let _ = (idx, mag); }
+    fn measurements(&self) -> &[f64] {
+        &[]
+    }
+    fn get_mv(&self) -> Vec<f64> {
+        vec![]
+    }
+    fn set_inputs(&mut self, mv: &[f64], dv: &[f64]) {
+        let _ = (mv, dv);
+    }
+    fn advance_time(&mut self, dt: f64) {
+        let _ = dt;
+    }
+    fn alarms(&self) -> Vec<Alarm> {
+        vec![]
+    }
+    fn set_idv_step_mag(&mut self, idx: usize, mag: f64) {
+        let _ = (idx, mag);
+    }
 }
 
 impl DynamicModel for Box<dyn DynamicModel> {
@@ -36,5 +48,3 @@ impl DynamicModel for Box<dyn DynamicModel> {
         self.as_mut().set_idv_step_mag(idx, mag);
     }
 }
-
-
