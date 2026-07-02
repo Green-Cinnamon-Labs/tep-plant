@@ -1,5 +1,5 @@
 // dynamics/mod.rs
-pub mod model;
+pub mod model_v2;
 pub mod disturbance;
 pub mod thermo;
 

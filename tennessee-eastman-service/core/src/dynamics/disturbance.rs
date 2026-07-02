@@ -1,5 +1,3 @@
-
-
 /** ## State of a single cubic disturbance channel.
 
  A disturbance is modeled as a piecewise cubic polynomial that is
@@ -29,8 +27,8 @@ pub struct DisturbanceChannel {
     pub h_zero: f64,
 
     /// Shape parameters that control signal amplitude
-    pub s_span:  f64,
-    pub s_zero:  f64,
+    pub s_span: f64,
+    pub s_zero: f64,
     pub sp_span: f64,
 
     /// Whether this channel is active (0 = off, 1 = on)
@@ -69,14 +67,17 @@ impl DisturbanceChannel {
 */
 #[derive(Debug, Clone)]
 pub struct CubicDisturbanceState {
-    pub channels:  Vec<DisturbanceChannel>,
+    pub channels: Vec<DisturbanceChannel>,
     pub rand_seed: f64,
 }
 
 impl CubicDisturbanceState {
     /// Create a new state with pre-built channels and a given seed.
     pub fn new(channels: Vec<DisturbanceChannel>, rand_seed: f64) -> Self {
-        Self { channels, rand_seed }
+        Self {
+            channels,
+            rand_seed,
+        }
     }
 }
 
@@ -101,17 +102,17 @@ pub fn eval_disturbance(idx: usize, time: f64, state: &CubicDisturbanceState) ->
  Direct translation of SUBROUTINE TESUB5 from teprob.f
 */
 pub fn update_segment(idx: usize, s: f64, sp: f64, state: &mut CubicDisturbanceState) {
-    let h      = state.channels[idx].h_span * lcg_rand(-1, state) + state.channels[idx].h_zero;
+    let h = state.channels[idx].h_span * lcg_rand(-1, state) + state.channels[idx].h_zero;
     let active = state.channels[idx].active as f64;
-    let s1     = state.channels[idx].s_span  * lcg_rand(-1, state) * active + state.channels[idx].s_zero;
-    let s1p    = state.channels[idx].sp_span * lcg_rand(-1, state) * active;
+    let s1 = state.channels[idx].s_span * lcg_rand(-1, state) * active + state.channels[idx].s_zero;
+    let s1p = state.channels[idx].sp_span * lcg_rand(-1, state) * active;
 
-    let ch     = &mut state.channels[idx];
-    ch.a       = s;
-    ch.b       = sp;
-    ch.c       = (3.0 * (s1 - s) - h * (s1p + 2.0 * sp)) / (h * h);
-    ch.d       = (2.0 * (s - s1) + h * (s1p + sp))        / (h * h * h);
-    ch.t_next  = ch.t_last + h;
+    let ch = &mut state.channels[idx];
+    ch.a = s;
+    ch.b = sp;
+    ch.c = (3.0 * (s1 - s) - h * (s1p + 2.0 * sp)) / (h * h);
+    ch.d = (2.0 * (s - s1) + h * (s1p + sp)) / (h * h * h);
+    ch.t_next = ch.t_last + h;
 }
 
 /** ## Generate approximate Gaussian white noise with standard deviation `std`.
