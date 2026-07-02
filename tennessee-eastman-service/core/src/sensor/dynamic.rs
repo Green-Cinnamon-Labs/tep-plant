@@ -1,11 +1,11 @@
 // sensor/dynamic.rs
 //
-// Sensors with dynamic state implementing DynamicModelV2.
+// Sensors with dynamic state implementing DynamicModel.
 // Stateless sensors (FI, LI, TI, PI, AI) remain in sensor/model.rs.
 // These types model sensors whose output has its own response lag —
 // e.g., a thermocouple or pressure transmitter with first-order dynamics.
 
-use crate::dynamics::model_v2::DynamicModelV2;
+use crate::model::DynamicModel;
 
 // ── FirstOrderSensor ──────────────────────────────────────────────────────────
 // Models a sensor with first-order response lag: d(output)/dt = (input - output) / tau
@@ -33,15 +33,19 @@ impl FirstOrderSensor {
     }
 }
 
-impl DynamicModelV2 for FirstOrderSensor {
-    fn state_size(&self) -> usize { 1 }
+impl DynamicModel for FirstOrderSensor {
+    fn state_size(&self) -> usize {
+        1
+    }
 
-    fn derivatives(&mut self, state: &[f64]) -> Vec<f64> {
+    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
         let output = state[0];
         vec![(self.input - output) / self.tau]
     }
 
-    fn name(&self) -> &'static str { "FirstOrderSensor" }
+    fn name(&self) -> &'static str {
+        "FirstOrderSensor"
+    }
 }
 
 // ── SampledSensor ─────────────────────────────────────────────────────────────
@@ -58,7 +62,10 @@ pub struct SampledSensor {
 
 impl SampledSensor {
     pub fn new() -> Self {
-        Self { input: 0.0, sample_pending: false }
+        Self {
+            input: 0.0,
+            sample_pending: false,
+        }
     }
 
     pub fn trigger(&mut self, physical_value: f64) {
@@ -71,19 +78,23 @@ impl SampledSensor {
     }
 }
 
-impl DynamicModelV2 for SampledSensor {
-    fn state_size(&self) -> usize { 1 }
+impl DynamicModel for SampledSensor {
+    fn state_size(&self) -> usize {
+        1
+    }
 
-    fn derivatives(&mut self, state: &[f64]) -> Vec<f64> {
+    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
         // Zero-order hold: output is constant between samples.
         // The sample event updates input externally via trigger().
         let held = state[0];
         if self.sample_pending {
-            vec![(self.input - held) / 1e-6]  // fast step toward new sample
+            vec![(self.input - held) / 1e-6] // fast step toward new sample
         } else {
             vec![0.0]
         }
     }
 
-    fn name(&self) -> &'static str { "SampledSensor" }
+    fn name(&self) -> &'static str {
+        "SampledSensor"
+    }
 }

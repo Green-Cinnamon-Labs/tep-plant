@@ -1,5 +1,7 @@
 // core/lib.rs
-pub mod dynamics;
-pub mod method;
 pub mod actuator;
+pub mod disturbance;
+pub mod method;
+pub mod model;
 pub mod sensor;
+pub mod tep;

@@ -1,6 +1,6 @@
 // dynamics/tep/disturbance_state.rs
 
-use crate::dynamics::disturbance::{CubicDisturbanceState, DisturbanceChannel};
+use crate::disturbance::cubic::{CubicDisturbanceState, DisturbanceChannel};
 
 /** ## TEP-specific disturbance state.
 

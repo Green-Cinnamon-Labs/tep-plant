@@ -7,5 +7,10 @@
         }
     ],
     "fortran.fortls.disabled": true,
-    "lldb.evaluateForHovers": false
+    "lldb.evaluateForHovers": false,
+    "editor.wordWrap": "off",
+    "editor.rulers": [],
+    "[rust]": {
+        "editor.formatOnSave": false
+    }
 }
