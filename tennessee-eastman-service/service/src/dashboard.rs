@@ -1,20 +1,31 @@
 // dashboard.rs
 
-use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
-    Frame, Terminal,
-};
-use std::io;
-use te_core::snapshot::SimulationSnapshot;
+// TODO(refactor-core): `te_core::snapshot::SimulationSnapshot` foi removido durante a
+// refatoração do core (issue #58 / #55). Todo o dashboard dependia dele e foi
+// temporariamente comentado abaixo até a nova API do core (snapshot/alarms) ser
+// reescrita. Isso está ERRADO/incompleto — o TUI não renderiza nada.
+// use crossterm::{
+//     event::{self, Event, KeyCode, KeyModifiers},
+//     execute,
+//     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+// };
+// use ratatui::{
+//     backend::CrosstermBackend,
+//     layout::{Constraint, Direction, Layout, Rect},
+//     style::{Color, Modifier, Style},
+//     text::{Line, Span},
+//     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+//     Frame, Terminal,
+// };
+// use std::io;
+// use te_core::snapshot::SimulationSnapshot;
+
+// TODO(refactor-core): stub temporário para manter o crate compilando enquanto o core
+// é reescrito. Nenhum método real está implementado.
+pub struct Dashboard;
+
+/*
+TODO(refactor-core): implementação original, preservada para referência.
 
 const XMEAS_META: &[(usize, &str, &str, &str)] = &[
     (0,  "XMEAS(1)",  "A Feed",                "kscmh"),
@@ -315,3 +326,4 @@ fn render_state(f: &mut Frame, area: Rect, snap: &SimulationSnapshot) {
         area,
     );
 }
+*/

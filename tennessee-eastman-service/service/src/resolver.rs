@@ -1,9 +1,8 @@
 // service/src/resolver.rs
 
-use te_core::dynamics::model::DynamicModel;
-use te_core::dynamics::tep::model::TennesseeEastmanModel;
-use te_core::dynamics::tep::initial_state::InitialState;
-
+use te_core::model::DynamicModel;
+use te_core::tep::TennesseeEastmanModel;
+use te_core::tep::initial_state::InitialState;
 use te_core::method::integrator::Integrator;
 use te_core::method::rk4::RK4;
 

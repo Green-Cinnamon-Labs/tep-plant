@@ -3,8 +3,8 @@
 use crate::model::DynamicModel;
 
 // ── Valve ───────────────────────────────────────────────────────────
-// Models a control valve with first-order lag: d(vpos)/dt = (command - vpos) / tau
-// State: [vpos]  (one variable: current valve position, 0–100 %)
+// Models a control valve with first-order lag: d(position)/dt = (command - position) / tau
+// State: [position]  (one variable: current valve position, 0–100 %)
 
 pub struct Valve {
     pub tau: f64,
@@ -31,8 +31,8 @@ impl DynamicModel for Valve {
     }
 
     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        let vpos = state[0];
-        vec![(self.command - vpos) / self.tau]
+        let position = state[0];
+        vec![(self.command - position) / self.tau]
     }
 
     fn name(&self) -> &'static str {

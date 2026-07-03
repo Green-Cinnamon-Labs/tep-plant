@@ -36,9 +36,9 @@ const VALVE_FLOW_MAX: [f64; 12] = [
        0.0,  // XMV-12: agitator        — não é válvula, não usa este array
 ];
 
-fn stream_composition(xst: &[[f64; 13]; 8], stream: usize) -> [f64; 8] {
+fn stream_composition(mole_fractions: &[[f64; 13]; 8], stream: usize) -> [f64; 8] {
     let mut col = [0.0f64; 8];
-    for i in 0..8 { col[i] = xst[i][stream]; }
+    for i in 0..8 { col[i] = mole_fractions[i][stream]; }
     col
 }
 
@@ -157,7 +157,7 @@ pub struct HeatOut {
 
 // ─── TepDisturbances (Blocks 7–12) ───────────────────────────────────────────
 // Atualiza o estado de perturbações e calcula as condições de alimentação.
-// Modifica xst[0..2][3], tst[0], tst[3] in-place via referência mutável.
+// Modifica mole_fractions[0..2][3], stream_temperatures[0], stream_temperatures[3] in-place via referência mutável.
 
 pub struct TepDisturbances;
 
@@ -175,7 +175,7 @@ impl TepDisturbances {
             *v = if *v > 0 { 1 } else { 0 };
         }
 
-        // Block 8
+        // Block 8 — liga/desliga canais de distúrbio conforme flags IDV ativos
         state.channels[0].active = flags[7];
         state.channels[1].active = flags[7];
         state.channels[2].active = flags[8];
@@ -189,46 +189,42 @@ impl TepDisturbances {
         state.channels[10].active = flags[17];
         state.channels[11].active = flags[19];
 
-        // Block 9
+        // Block 9 — avança segmentos cúbicos dos canais 0–8 (distúrbios contínuos de composição e temperatura)
         for i in 0..9 {
             if time >= state.channels[i].t_next {
-                let hw = state.channels[i].t_next - state.channels[i].t_last;
-                let sw = state.channels[i].a
-                    + hw * (state.channels[i].b + hw * (state.channels[i].c + hw * state.channels[i].d));
-                let spw =
-                    state.channels[i].b + hw * (2.0 * state.channels[i].c + 3.0 * hw * state.channels[i].d);
+                let segment_duration = state.channels[i].t_next - state.channels[i].t_last;
+                let end_value = state.channels[i].a + segment_duration * (state.channels[i].b + segment_duration * (state.channels[i].c + segment_duration * state.channels[i].d));
+                let end_slope = state.channels[i].b + segment_duration * (2.0 * state.channels[i].c + 3.0 * segment_duration * state.channels[i].d);
                 state.channels[i].t_last = state.channels[i].t_next;
-                update_segment(i, sw, spw, state);
+                update_segment(i, end_value, end_slope, state);
             }
         }
 
-        // Block 10
+        // Block 10 — avança segmentos cúbicos dos canais 9–11 (distúrbios randômicos com pulsos de amplitude aleatória)
         for i in 9..12 {
             if time >= state.channels[i].t_next {
-                let hw = state.channels[i].t_next - state.channels[i].t_last;
-                let sw = state.channels[i].a
-                    + hw * (state.channels[i].b + hw * (state.channels[i].c + hw * state.channels[i].d));
-                let spw =
-                    state.channels[i].b + hw * (2.0 * state.channels[i].c + 3.0 * hw * state.channels[i].d);
+                let segment_duration = state.channels[i].t_next - state.channels[i].t_last;
+                let end_value = state.channels[i].a + segment_duration * (state.channels[i].b + segment_duration * (state.channels[i].c + segment_duration * state.channels[i].d));
+                let end_slope = state.channels[i].b + segment_duration * (2.0 * state.channels[i].c + 3.0 * segment_duration * state.channels[i].d);
                 state.channels[i].t_last = state.channels[i].t_next;
-                if sw > 0.1 {
-                    state.channels[i].a = sw;
-                    state.channels[i].b = spw;
-                    state.channels[i].c = -(3.0 * sw + 0.2 * spw) / 0.01;
-                    state.channels[i].d = (2.0 * sw + 0.1 * spw) / 0.001;
+                if end_value > 0.1 {
+                    state.channels[i].a = end_value;
+                    state.channels[i].b = end_slope;
+                    state.channels[i].c = -(3.0 * end_value + 0.2 * end_slope) / 0.01;
+                    state.channels[i].d = (2.0 * end_value + 0.1 * end_slope) / 0.001;
                     state.channels[i].t_next = state.channels[i].t_last + 0.1;
                 } else {
-                    let hw2 = state.channels[i].h_span * lcg_rand(-1, state) + state.channels[i].h_zero;
+                    let next_duration = state.channels[i].h_span * lcg_rand(-1, state) + state.channels[i].h_zero;
                     state.channels[i].a = 0.0;
                     state.channels[i].b = 0.0;
-                    state.channels[i].c = state.channels[i].active as f64 / (hw2 * hw2);
+                    state.channels[i].c = state.channels[i].active as f64 / (next_duration * next_duration);
                     state.channels[i].d = 0.0;
-                    state.channels[i].t_next = state.channels[i].t_last + hw2;
+                    state.channels[i].t_next = state.channels[i].t_last + next_duration;
                 }
             }
         }
 
-        // Block 11
+        // Block 11 — inicializa todos os canais no instante zero (condição inicial da simulação)
         if time == 0.0 {
             for i in 0..12 {
                 state.channels[i].a = state.channels[i].s_zero;
@@ -240,7 +236,7 @@ impl TepDisturbances {
             }
         }
 
-        // Block 12
+        // Block 12 — aplica distúrbios: atualiza composição e temperatura do feed A/C e calcula fatores de saída
         stream_comps[0][3] =
             eval_disturbance(0, time, state) - flags[0] as f64 * 0.03 - flags[1] as f64 * 2.43719e-3;
         stream_comps[1][3] = eval_disturbance(1, time, state) + flags[1] as f64 * 0.005;
@@ -274,8 +270,9 @@ impl TepReactor {
         reaction_factor_1: f64,
         reaction_factor_2: f64,
         time: f64,
-        c: &TepConstants,
+        constants: &TepConstants,
     ) -> ReactorOut {
+        
         let mut vapor_moles  = [0.0f64; 8]; // kmol A,B,C na fase vapor (estado)
         let mut liquid_moles = [0.0f64; 8]; // kmol D,E,F,G,H na fase líquida (estado)
         for i in 0..3 { vapor_moles[i]  = slice[i]; }
@@ -288,9 +285,9 @@ impl TepReactor {
 
         let specific_enthalpy = total_enthalpy / total_liquid_moles;
         let temperature_init = if time == 0.0 { 120.0 } else { 0.0 };
-        let temperature   = temperature_from_enthalpy(&liquid_composition, temperature_init, specific_enthalpy, 0, c);
+        let temperature   = temperature_from_enthalpy(&liquid_composition, temperature_init, specific_enthalpy, 0, constants);
         let temperature_k = temperature + 273.15;
-        let density       = liquid_density(&liquid_composition, temperature, c);
+        let density       = liquid_density(&liquid_composition, temperature, constants);
         let volume_liquid = total_liquid_moles / density;
         let volume_vapor  = REACTOR_VOLUME - volume_liquid;
 
@@ -301,7 +298,7 @@ impl TepReactor {
             pressure += partial_pressures[i];
         }
         for i in 3..8 {
-            partial_pressures[i] = (c.avp[i] + c.bvp[i] / (temperature + c.cvp[i])).exp() * liquid_composition[i];
+            partial_pressures[i] = (constants.avp[i] + constants.bvp[i] / (temperature + constants.cvp[i])).exp() * liquid_composition[i];
             pressure += partial_pressures[i];
         }
 
@@ -372,7 +369,7 @@ impl TepReactor {
 pub struct TepSeparator;
 
 impl TepSeparator {
-    pub fn compute_thermo(slice: &[f64], reactor_temperature: f64, c: &TepConstants) -> SeparatorOut {
+    pub fn compute_thermo(slice: &[f64], reactor_temperature: f64, constants: &TepConstants) -> SeparatorOut {
         let mut vapor_moles = [0.0f64; 8];   // kmol de A,B,C na fase vapor (estado)
         let mut liquid_moles = [0.0f64; 8];  // kmol de D,E,F,G,H na fase líquida (estado)
         for i in 0..3 {
@@ -390,9 +387,9 @@ impl TepSeparator {
         }
 
         let specific_enthalpy = total_enthalpy / total_liquid_moles;
-        let temperature = temperature_from_enthalpy(&liquid_composition, reactor_temperature, specific_enthalpy, 0, c);
+        let temperature = temperature_from_enthalpy(&liquid_composition, reactor_temperature, specific_enthalpy, 0, constants);
         let temperature_k = temperature + 273.15;
-        let density = liquid_density(&liquid_composition, temperature, c);
+        let density = liquid_density(&liquid_composition, temperature, constants);
         let volume_liquid = total_liquid_moles / density;
         let volume_vapor = SEPARATOR_VOLUME - volume_liquid;
 
@@ -403,7 +400,7 @@ impl TepSeparator {
             pressure += partial_pressures[i];
         }
         for i in 3..8 {
-            partial_pressures[i] = (c.avp[i] + c.bvp[i] / (temperature + c.cvp[i])).exp() * liquid_composition[i];
+            partial_pressures[i] = (constants.avp[i] + constants.bvp[i] / (temperature + constants.cvp[i])).exp() * liquid_composition[i];
             pressure += partial_pressures[i];
         }
 
@@ -446,7 +443,7 @@ impl TepSeparator {
 pub struct TepStripper;
 
 impl TepStripper {
-    pub fn compute_thermo(slice: &[f64], separator_temperature: f64, c: &TepConstants) -> StripperOut {
+    pub fn compute_thermo(slice: &[f64], separator_temperature: f64, constants: &TepConstants) -> StripperOut {
         let mut liquid_moles = [0.0f64; 8];
         for i in 0..8 { liquid_moles[i] = slice[i]; }
         let total_enthalpy = slice[8];
@@ -456,8 +453,8 @@ impl TepStripper {
         for i in 0..8 { liquid_composition[i] = liquid_moles[i] / total_liquid_moles; }
 
         let specific_enthalpy = total_enthalpy / total_liquid_moles;
-        let temperature = temperature_from_enthalpy(&liquid_composition, separator_temperature, specific_enthalpy, 0, c);
-        let density     = liquid_density(&liquid_composition, temperature, c);
+        let temperature = temperature_from_enthalpy(&liquid_composition, separator_temperature, specific_enthalpy, 0, constants);
+        let density     = liquid_density(&liquid_composition, temperature, constants);
         let volume_liquid = total_liquid_moles / density;
 
         StripperOut { temperature, liquid_composition, liquid_volume: volume_liquid, liquid_density: density }
@@ -482,7 +479,7 @@ impl TepStripper {
 pub struct TepCompressor;
 
 impl TepCompressor {
-    pub fn compute_thermo(slice: &[f64], separator_temperature: f64, c: &TepConstants) -> CompressorOut {
+    pub fn compute_thermo(slice: &[f64], separator_temperature: f64, constants: &TepConstants) -> CompressorOut {
         let mut vapor_moles = [0.0f64; 8];
         for i in 0..8 { vapor_moles[i] = slice[i]; }
         let total_enthalpy = slice[8];
@@ -492,7 +489,7 @@ impl TepCompressor {
         for i in 0..8 { vapor_composition[i] = vapor_moles[i] / total_vapor_moles; }
 
         let specific_enthalpy = total_enthalpy / total_vapor_moles;
-        let temperature   = temperature_from_enthalpy(&vapor_composition, separator_temperature, specific_enthalpy, 2, c);
+        let temperature   = temperature_from_enthalpy(&vapor_composition, separator_temperature, specific_enthalpy, 2, constants);
         let temperature_k = temperature + 273.15;
         let pressure      = total_vapor_moles * GAS_CONSTANT* temperature_k / COMPRESSOR_VESSEL_VOLUME;
 
@@ -517,7 +514,7 @@ impl TepCompressor {
 
 // ─── TepFlows (Blocks 19–31) ─────────────────────────────────────────────────
 // Calcula composições de correntes, fluxos mássicos e fracionamento no stripper.
-// Modifica xst e tst in-place (colunas 4–12) e sfr.
+// Modifica mole_fractions e stream_temperatures in-place (colunas 4–12) e stripper_split_fractions.
 
 pub struct TepFlows;
 
@@ -528,70 +525,70 @@ impl TepFlows {
         separator: &SeparatorOut,
         stripper: &StripperOut,
         compressor: &CompressorOut,
-        xst: &mut [[f64; 13]; 8],
-        tst: &mut [f64; 13],
-        sfr: &mut [f64; 8],
-        vpos: &ValvePositions,
+        mole_fractions: &mut [[f64; 13]; 8],
+        stream_temperatures: &mut [f64; 13],
+        stripper_split_fractions: &mut [f64; 8],
+        valve_positions: &ValvePositions,
         idv: &[i32; 20],
-        c: &TepConstants,
+        constants: &TepConstants,
         time: f64,
         ds: &CubicDisturbanceState,
     ) -> FlowsOut {
 
         // Block 19: composições de corrente a partir dos estados de unidade
         for i in 0..8 {
-            xst[i][5]  = compressor.vapor_composition[i];
-            xst[i][7]  = reactor.vapor_composition[i];
-            xst[i][8]  = separator.vapor_composition[i];
-            xst[i][9]  = separator.vapor_composition[i];
-            xst[i][10] = separator.liquid_composition[i];
-            xst[i][12] = stripper.liquid_composition[i];
+            mole_fractions[i][5]  = compressor.vapor_composition[i];
+            mole_fractions[i][7]  = reactor.vapor_composition[i];
+            mole_fractions[i][8]  = separator.vapor_composition[i];
+            mole_fractions[i][9]  = separator.vapor_composition[i];
+            mole_fractions[i][10] = separator.liquid_composition[i];
+            mole_fractions[i][12] = stripper.liquid_composition[i];
         }
 
         // Block 20: pesos moleculares médios de cada stream
         let mut mol_weights = [0.0f64; 13];
         for i in 0..8 {
-            mol_weights[0] += xst[i][0] * c.xmw[i];
-            mol_weights[1] += xst[i][1] * c.xmw[i];
-            mol_weights[5] += xst[i][5] * c.xmw[i];
-            mol_weights[7] += xst[i][7] * c.xmw[i];
-            mol_weights[8] += xst[i][8] * c.xmw[i];
-            mol_weights[9] += xst[i][9] * c.xmw[i];
+            mol_weights[0] += mole_fractions[i][0] * constants.xmw[i];
+            mol_weights[1] += mole_fractions[i][1] * constants.xmw[i];
+            mol_weights[5] += mole_fractions[i][5] * constants.xmw[i];
+            mol_weights[7] += mole_fractions[i][7] * constants.xmw[i];
+            mol_weights[8] += mole_fractions[i][8] * constants.xmw[i];
+            mol_weights[9] += mole_fractions[i][9] * constants.xmw[i];
         }
 
         // Block 21: temperaturas e entalpias das correntes
-        tst[5]  = compressor.temperature;  // stream 6: feed do reator (saída do compressor)
-        tst[7]  = reactor.temperature;     // stream 8: efluente do reator
-        tst[8]  = separator.temperature;   // stream 9: vapor de topo do separador
-        tst[9]  = separator.temperature;   // stream 10: líquido do separador (mesma temp. do topo)
-        tst[10] = separator.temperature;   // stream 11: feed do stripper (mesmo líquido)
-        tst[12] = stripper.temperature;    // stream 13: produto de fundo do stripper
+        stream_temperatures[5]  = compressor.temperature;  // stream 6: feed do reator (saída do compressor)
+        stream_temperatures[7]  = reactor.temperature;     // stream 8: efluente do reator
+        stream_temperatures[8]  = separator.temperature;   // stream 9: vapor de topo do separador
+        stream_temperatures[9]  = separator.temperature;   // stream 10: líquido do separador (mesma temp. do topo)
+        stream_temperatures[10] = separator.temperature;   // stream 11: feed do stripper (mesmo líquido)
+        stream_temperatures[12] = stripper.temperature;    // stream 13: produto de fundo do stripper
         let mut enthalpies = [0.0f64; 13];
-        enthalpies[0]  = mixture_enthalpy(&stream_composition(xst, 0),  tst[0],  1, c); // stream 1: feed A (vapor)
-        enthalpies[1]  = mixture_enthalpy(&stream_composition(xst, 1),  tst[1],  1, c); // stream 2: feed D (vapor)
-        enthalpies[2]  = mixture_enthalpy(&stream_composition(xst, 2),  tst[2],  1, c); // stream 3: feed E (vapor)
-        enthalpies[3]  = mixture_enthalpy(&stream_composition(xst, 3),  tst[3],  1, c); // stream 4: feed A/C (vapor)
-        enthalpies[5]  = mixture_enthalpy(&stream_composition(xst, 5),  tst[5],  1, c); // stream 6: feed do reator (vapor)
-        enthalpies[7]  = mixture_enthalpy(&stream_composition(xst, 7),  tst[7],  1, c); // stream 8: efluente do reator (vapor)
-        enthalpies[8]  = mixture_enthalpy(&stream_composition(xst, 8),  tst[8],  1, c); // stream 9: topo do separador (vapor)
+        enthalpies[0]  = mixture_enthalpy(&stream_composition(mole_fractions, 0),  stream_temperatures[0],  1, constants); // stream 1: feed A (vapor)
+        enthalpies[1]  = mixture_enthalpy(&stream_composition(mole_fractions, 1),  stream_temperatures[1],  1, constants); // stream 2: feed D (vapor)
+        enthalpies[2]  = mixture_enthalpy(&stream_composition(mole_fractions, 2),  stream_temperatures[2],  1, constants); // stream 3: feed E (vapor)
+        enthalpies[3]  = mixture_enthalpy(&stream_composition(mole_fractions, 3),  stream_temperatures[3],  1, constants); // stream 4: feed A/C (vapor)
+        enthalpies[5]  = mixture_enthalpy(&stream_composition(mole_fractions, 5),  stream_temperatures[5],  1, constants); // stream 6: feed do reator (vapor)
+        enthalpies[7]  = mixture_enthalpy(&stream_composition(mole_fractions, 7),  stream_temperatures[7],  1, constants); // stream 8: efluente do reator (vapor)
+        enthalpies[8]  = mixture_enthalpy(&stream_composition(mole_fractions, 8),  stream_temperatures[8],  1, constants); // stream 9: topo do separador (vapor)
         enthalpies[9]  = enthalpies[8];                                        // stream 10: igual ao topo do separador
-        enthalpies[10] = mixture_enthalpy(&stream_composition(xst, 10), tst[10], 0, c); // stream 11: líquido para stripper
-        enthalpies[12] = mixture_enthalpy(&stream_composition(xst, 12), tst[12], 0, c); // stream 13: produto do stripper (líquido)
+        enthalpies[10] = mixture_enthalpy(&stream_composition(mole_fractions, 10), stream_temperatures[10], 0, constants); // stream 11: líquido para stripper
+        enthalpies[12] = mixture_enthalpy(&stream_composition(mole_fractions, 12), stream_temperatures[12], 0, constants); // stream 13: produto do stripper (líquido)
 
         // Blocks 22–24: vazões molares [kmol/h]
         let mut flows = [0.0f64; 13];
-        flows[0]  = vpos.a_feed * VALVE_FLOW_MAX[0] / 100.0;   // feed A (gás)
-        flows[1]  = vpos.d_feed * VALVE_FLOW_MAX[1] / 100.0;   // feed D (líquido)
-        flows[2]  = vpos.e_feed * (1.0 - idv[5] as f64) * VALVE_FLOW_MAX[2] / 100.0;                // feed E; IDV6 bloqueia
-        flows[3]  = vpos.c_feed * (1.0 - idv[6] as f64 * 0.2) * VALVE_FLOW_MAX[3] / 100.0 + 1e-10; // feed A/C; IDV7 reduz 20%
-        flows[10] = vpos.purge   * VALVE_FLOW_MAX[6] / 100.0;  // purga (separador → saída)
-        flows[12] = vpos.product * VALVE_FLOW_MAX[7] / 100.0;  // produto (stripper → saída)
-        let condenser_ua    = vpos.condenser_cooling * VALVE_FLOW_MAX[8] * (1.0 + eval_disturbance(8, time, ds)) / 100.0;
-        let agitation_factor = (vpos.agitator + 150.0) / 100.0;
+        flows[0]  = valve_positions.a_feed * VALVE_FLOW_MAX[0] / 100.0;   // feed A (gás)
+        flows[1]  = valve_positions.d_feed * VALVE_FLOW_MAX[1] / 100.0;   // feed D (líquido)
+        flows[2]  = valve_positions.e_feed * (1.0 - idv[5] as f64) * VALVE_FLOW_MAX[2] / 100.0;                // feed E; IDV6 bloqueia
+        flows[3]  = valve_positions.c_feed * (1.0 - idv[6] as f64 * 0.2) * VALVE_FLOW_MAX[3] / 100.0 + 1e-10; // feed A/C; IDV7 reduz 20%
+        flows[10] = valve_positions.purge   * VALVE_FLOW_MAX[6] / 100.0;  // purga (separador → saída)
+        flows[12] = valve_positions.product * VALVE_FLOW_MAX[7] / 100.0;  // produto (stripper → saída)
+        let condenser_ua    = valve_positions.condenser_cooling * VALVE_FLOW_MAX[8] * (1.0 + eval_disturbance(8, time, ds)) / 100.0;
+        let agitation_factor = (valve_positions.agitator + 150.0) / 100.0;
 
         flows[5] = 1937.6  * (compressor.pressure - reactor.pressure).max(0.0).sqrt() / mol_weights[5]; // feed do reator — ΔP compressor→reator
         flows[7] = 4574.21 * (reactor.pressure   - separator.pressure).max(0.0).sqrt() * (1.0 - 0.25 * eval_disturbance(11, time, ds)) / mol_weights[7]; // reator→separador — ΔP + IDV20
-        flows[9] = vpos.separator_liquid * 0.151169 * (separator.pressure - 760.0).max(0.0).sqrt() / mol_weights[9]; // líquido separador→stripper
+        flows[9] = valve_positions.separator_liquid * 0.151169 * (separator.pressure - 760.0).max(0.0).sqrt() / mol_weights[9]; // líquido separador→stripper
 
         // Compressor (curva característica + anti-surge)
         let pressure_ratio = (compressor.pressure / separator.pressure).max(1.0).min(COMPRESSOR_PRESSURE_RATIO_MAX);
@@ -599,7 +596,7 @@ impl TepFlows {
         let mut compressor_mass_flow = COMPRESSOR_FLOW_MAX + flow_coeff * (1.0 - pressure_ratio.powi(3));
         let compressor_work = compressor_mass_flow * (separator.temperature + 273.15) * 1.8e-6 * 1.9872
             * (compressor.pressure - separator.pressure) / (mol_weights[8] * separator.pressure);
-        compressor_mass_flow -= vpos.recycle * 53.349 * (compressor.pressure - separator.pressure).max(0.0).sqrt(); // anti-surge
+        compressor_mass_flow -= valve_positions.recycle * 53.349 * (compressor.pressure - separator.pressure).max(0.0).sqrt(); // anti-surge
         compressor_mass_flow  = compressor_mass_flow.max(1e-3);
         flows[8]       = compressor_mass_flow / mol_weights[8];   // kg/h → kmol/h
         enthalpies[8] += compressor_work / flows[8];              // adiciona calor de compressão
@@ -607,16 +604,16 @@ impl TepFlows {
         // Block 25: fluxos por componente
         let mut comp_flows = [[0.0f64; 13]; 8];
         for i in 0..8 {
-            comp_flows[i][0]  = xst[i][0]  * flows[0];
-            comp_flows[i][1]  = xst[i][1]  * flows[1];
-            comp_flows[i][2]  = xst[i][2]  * flows[2];
-            comp_flows[i][3]  = xst[i][3]  * flows[3];
-            comp_flows[i][5]  = xst[i][5]  * flows[5];
-            comp_flows[i][7]  = xst[i][7]  * flows[7];
-            comp_flows[i][8]  = xst[i][8]  * flows[8];
-            comp_flows[i][9]  = xst[i][9]  * flows[9];
-            comp_flows[i][10] = xst[i][10] * flows[10];
-            comp_flows[i][12] = xst[i][12] * flows[12];
+            comp_flows[i][0]  = mole_fractions[i][0]  * flows[0];
+            comp_flows[i][1]  = mole_fractions[i][1]  * flows[1];
+            comp_flows[i][2]  = mole_fractions[i][2]  * flows[2];
+            comp_flows[i][3]  = mole_fractions[i][3]  * flows[3];
+            comp_flows[i][5]  = mole_fractions[i][5]  * flows[5];
+            comp_flows[i][7]  = mole_fractions[i][7]  * flows[7];
+            comp_flows[i][8]  = mole_fractions[i][8]  * flows[8];
+            comp_flows[i][9]  = mole_fractions[i][9]  * flows[9];
+            comp_flows[i][10] = mole_fractions[i][10] * flows[10];
+            comp_flows[i][12] = mole_fractions[i][12] * flows[12];
         }
 
         // Blocks 26–31: fracionamento vapor/líquido no stripper
@@ -629,17 +626,17 @@ impl TepFlows {
                 363.744 / (177.0 - stripper.temperature) - 2.22579488
             };
             let vapor_over_liquid = flows[3] / flows[10] * temperature_factor;
-            sfr[3] =  8.5010 * vapor_over_liquid / (1.0 +  8.5010 * vapor_over_liquid);
-            sfr[4] = 11.402  * vapor_over_liquid / (1.0 + 11.402  * vapor_over_liquid);
-            sfr[5] = 11.795  * vapor_over_liquid / (1.0 + 11.795  * vapor_over_liquid);
-            sfr[6] =  0.0480 * vapor_over_liquid / (1.0 +  0.0480 * vapor_over_liquid);
-            sfr[7] =  0.0242 * vapor_over_liquid / (1.0 +  0.0242 * vapor_over_liquid);
+            stripper_split_fractions[3] =  8.5010 * vapor_over_liquid / (1.0 +  8.5010 * vapor_over_liquid);
+            stripper_split_fractions[4] = 11.402  * vapor_over_liquid / (1.0 + 11.402  * vapor_over_liquid);
+            stripper_split_fractions[5] = 11.795  * vapor_over_liquid / (1.0 + 11.795  * vapor_over_liquid);
+            stripper_split_fractions[6] =  0.0480 * vapor_over_liquid / (1.0 +  0.0480 * vapor_over_liquid);
+            stripper_split_fractions[7] =  0.0242 * vapor_over_liquid / (1.0 +  0.0242 * vapor_over_liquid);
         } else {
-            sfr[3] = 0.9999;
-            sfr[4] = 0.999;
-            sfr[5] = 0.999;
-            sfr[6] = 0.99;
-            sfr[7] = 0.98;
+            stripper_split_fractions[3] = 0.9999;
+            stripper_split_fractions[4] = 0.999;
+            stripper_split_fractions[5] = 0.999;
+            stripper_split_fractions[6] = 0.99;
+            stripper_split_fractions[7] = 0.98;
         }
 
         let mut stripper_inlet = [0.0f64; 8]; // kmol/h de cada componente entrando no stripper
@@ -647,24 +644,24 @@ impl TepFlows {
         flows[4]  = 0.0;
         flows[11] = 0.0;
         for i in 0..8 {
-            comp_flows[i][4]  = sfr[i] * stripper_inlet[i];
+            comp_flows[i][4]  = stripper_split_fractions[i] * stripper_inlet[i];
             comp_flows[i][11] = stripper_inlet[i] - comp_flows[i][4];
             flows[4]  += comp_flows[i][4];
             flows[11] += comp_flows[i][11];
         }
         for i in 0..8 {
-            xst[i][4]  = comp_flows[i][4]  / flows[4];
-            xst[i][11] = comp_flows[i][11] / flows[11];
+            mole_fractions[i][4]  = comp_flows[i][4]  / flows[4];
+            mole_fractions[i][11] = comp_flows[i][11] / flows[11];
         }
-        tst[4] = stripper.temperature;
-        tst[11] = stripper.temperature;
-        enthalpies[4]  = mixture_enthalpy(&stream_composition(xst, 4),  tst[4],  1, c);
-        enthalpies[11] = mixture_enthalpy(&stream_composition(xst, 11), tst[11], 0, c);
+        stream_temperatures[4] = stripper.temperature;
+        stream_temperatures[11] = stripper.temperature;
+        enthalpies[4]  = mixture_enthalpy(&stream_composition(mole_fractions, 4),  stream_temperatures[4],  1, constants);
+        enthalpies[11] = mixture_enthalpy(&stream_composition(mole_fractions, 11), stream_temperatures[11], 0, constants);
         flows[6]  = flows[5];
         enthalpies[6]  = enthalpies[5];
-        tst[6] = tst[5];
+        stream_temperatures[6] = stream_temperatures[5];
         for i in 0..8 {
-            xst[i][6]       = xst[i][5];
+            mole_fractions[i][6]       = mole_fractions[i][5];
             comp_flows[i][6] = comp_flows[i][5];
         }
 

@@ -18,56 +18,55 @@ pub mod initial_state;
 pub mod subsystems;
 pub mod thermo;
 
-use crate::actuator::dynamic::{Agitator, Valve};
 use crate::model::DynamicModel;
+use crate::actuator::dynamic::{Agitator, Valve};
 use crate::tep::constants::TepConstants;
-use crate::tep::disturbance_state::TepDisturbanceState;
 use crate::tep::initial_state::InitialState;
-use crate::tep::subsystems::{
-    TepCompressor, TepDisturbances, TepFlows, TepHeat, TepMeasurements, TepReactor, TepSeparator,
-    TepStripper,
-};
+use crate::tep::disturbance_state::TepDisturbanceState;
+use crate::tep::subsystems::{TepCompressor, TepDisturbances, TepFlows, TepHeat, TepMeasurements, TepReactor, TepSeparator, TepStripper};
 
-const VTAU: [f64; 11] = [
-    8.0 / 3600.0,
-    8.0 / 3600.0,
-    6.0 / 3600.0,
-    9.0 / 3600.0,
-    7.0 / 3600.0,
-    5.0 / 3600.0,
-    5.0 / 3600.0,
-    5.0 / 3600.0,
-    120.0 / 3600.0,
-    5.0 / 3600.0,
-    5.0 / 3600.0,
+// Constantes de tempo τ de cada válvula [h]. Dividido por 3600 porque o integrador
+// usa horas como unidade de tempo, mas os valores físicos originais estão em segundos.
+const VALVE_TIME_CONSTANTS: [f64; 11] = [
+    8.0 / 3600.0, // XMV-01: feed A          — 8 s
+    8.0 / 3600.0, // XMV-02: feed D          — 8 s
+    6.0 / 3600.0, // XMV-03: feed E          — 6 s
+    9.0 / 3600.0, // XMV-04: feed A/C        — 9 s
+    7.0 / 3600.0, // XMV-05: recycle         — 7 s
+    5.0 / 3600.0, // XMV-06: separator liquid — 5 s
+    5.0 / 3600.0, // XMV-07: purge           — 5 s
+    5.0 / 3600.0, // XMV-08: product         — 5 s
+    120.0 / 3600.0, // XMV-09: cond. cooling   — 120 s (válvula de água, mais lenta)
+    5.0 / 3600.0, // XMV-10: reactor cooling — 5 s
+    5.0 / 3600.0, // XMV-11: stripper steam  — 5 s
 ];
 
 const AGITATOR_TAU: f64 = 5.0 / 3600.0;
 
-fn initial_xst() -> [[f64; 13]; 8] {
-    let mut xst = [[0.0f64; 13]; 8];
-    xst[1][0] = 0.0001;
-    xst[3][0] = 0.9999;
-    xst[4][1] = 0.9999;
-    xst[5][1] = 0.0001;
-    xst[0][2] = 0.9999;
-    xst[1][2] = 0.0001;
-    xst[0][3] = 0.485;
-    xst[1][3] = 0.005;
-    xst[2][3] = 0.510;
-    xst
+fn initial_mole_fractions() -> [[f64; 13]; 8] {
+    let mut mole_fractions = [[0.0f64; 13]; 8];
+    mole_fractions[1][0] = 0.0001;
+    mole_fractions[3][0] = 0.9999;
+    mole_fractions[4][1] = 0.9999;
+    mole_fractions[5][1] = 0.0001;
+    mole_fractions[0][2] = 0.9999;
+    mole_fractions[1][2] = 0.0001;
+    mole_fractions[0][3] = 0.485;
+    mole_fractions[1][3] = 0.005;
+    mole_fractions[2][3] = 0.510;
+    mole_fractions
 }
 
-fn initial_tst() -> [f64; 13] {
-    let mut tst = [0.0f64; 13];
-    tst[0] = 45.0;
-    tst[1] = 45.0;
-    tst[2] = 45.0;
-    tst[3] = 45.0;
-    tst
+fn initial_stream_temperatures() -> [f64; 13] {
+    let mut stream_temperatures = [0.0f64; 13];
+    stream_temperatures[0] = 45.0;
+    stream_temperatures[1] = 45.0;
+    stream_temperatures[2] = 45.0;
+    stream_temperatures[3] = 45.0;
+    stream_temperatures
 }
 
-fn initial_sfr() -> [f64; 8] {
+fn initial_stripper_split_fractions() -> [f64; 8] {
     [0.995, 0.991, 0.990, 0.916, 0.936, 0.938, 0.058, 0.0301]
 }
 
@@ -115,13 +114,13 @@ pub struct TennesseeEastmanModel {
     // Configuração e estado persistente da química
     pub constants: TepConstants,
     pub disturbance: TepDisturbanceState,
-    pub idv: [i32; 20],
-    pub idv_step_mag: [f64; 20],
+    pub disturbance_flags: [i32; 20],
+    pub disturbance_step_magnitudes: [f64; 20],
     pub time: f64,
-    pub xst: [[f64; 13]; 8],
-    pub tst: [f64; 13],
-    pub sfr: [f64; 8],
-    pub xmeas: [f64; 41],
+    pub mole_fractions: [[f64; 13]; 8],
+    pub stream_temperatures: [f64; 13],
+    pub stripper_split_fractions: [f64; 8],
+    pub process_measurements: [f64; 41],
 
     // Atuadores — cada um é um DynamicModel com 1 estado próprio
     pub valves: [Valve; 11],
@@ -131,11 +130,11 @@ pub struct TennesseeEastmanModel {
 impl TennesseeEastmanModel {
     pub fn new(initial: &InitialState) -> Self {
         let flat = initial.flatten();
-        let initial_vpos: [f64; 11] = flat[38..49].try_into().unwrap();
+        let initial_valve_positions: [f64; 11] = flat[38..49].try_into().unwrap();
         let initial_agitator_pos = flat[49];
         let valves = std::array::from_fn(|i| {
-            let mut v = Valve::new(VTAU[i]);
-            v.set_command(initial_vpos[i]);
+            let mut v = Valve::new(VALVE_TIME_CONSTANTS[i]);
+            v.set_command(initial_valve_positions[i]);
             v
         });
         let mut agitator = Agitator::new(AGITATOR_TAU);
@@ -143,8 +142,8 @@ impl TennesseeEastmanModel {
         Self {
             constants: TepConstants::new(),
             disturbance: TepDisturbanceState::new(),
-            idv: [0; 20],
-            idv_step_mag: {
+            disturbance_flags: [0; 20],
+            disturbance_step_magnitudes: {
                 let mut m = [1.0_f64; 20];
                 m[2] = 5.0;
                 m[3] = 5.0;
@@ -152,10 +151,10 @@ impl TennesseeEastmanModel {
                 m
             },
             time: 0.0,
-            xst: initial_xst(),
-            tst: initial_tst(),
-            sfr: initial_sfr(),
-            xmeas: [0.0; 41],
+            mole_fractions: initial_mole_fractions(),
+            stream_temperatures: initial_stream_temperatures(),
+            stripper_split_fractions: initial_stripper_split_fractions(),
+            process_measurements: [0.0; 41],
             valves,
             agitator,
         }
@@ -174,7 +173,7 @@ impl TennesseeEastmanModel {
 
     pub fn set_disturbances(&mut self, idv: &[i32]) {
         for (i, &v) in idv.iter().enumerate().take(20) {
-            self.idv[i] = v;
+            self.disturbance_flags[i] = v;
         }
     }
 
@@ -183,82 +182,81 @@ impl TennesseeEastmanModel {
     }
 
     pub fn xmeas(&self) -> &[f64; 41] {
-        &self.xmeas
+        &self.process_measurements
     }
 }
 
 impl DynamicModel for TennesseeEastmanModel {
+
     fn state_size(&self) -> usize {
         50 // 38 química + 11 válvulas + 1 agitador
     }
 
+    fn name(&self) -> &'static str {
+        "TennesseeEastmanModel"
+    }
+
+    fn set_commands(&mut self, xmv: &[f64]) {
+        for (i, valve) in self.valves.iter_mut().enumerate() {
+            if let Some(&cmd) = xmv.get(i) { valve.set_command(cmd); }
+        }
+        if let Some(&cmd) = xmv.get(11) { self.agitator.set_command(cmd); }
+    }
+
+    fn set_disturbances(&mut self, dv: &[f64]) {
+        for (i, &v) in dv.iter().enumerate().take(20) {
+            self.disturbance_flags[i] = v as i32;
+        }
+    }
+
+    fn advance_time(&mut self, dt: f64) {
+        self.time += dt;
+    }
+
+    fn set_disturbance_step_magnitude(&mut self, idx: usize, mag: f64) {
+        if idx < 20 { self.disturbance_step_magnitudes[idx] = mag; }
+    }
+
+    fn measurements(&self) -> Vec<f64> {
+        self.process_measurements.to_vec()
+    }
+
     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        let vpos = ValvePositions::from_state(state);
+        
+        let valve_positions = ValvePositions::from_state(state);
         let reactor_cw_return   = state[36];
         let separator_cw_return = state[37];
 
         // 1. Perturbações — atualiza feeds, retorna r1f/r2f/tcwr/tcws
-        let dist = TepDisturbances::compute(
-            self.time,
-            &self.idv,
-            &self.idv_step_mag,
-            &mut self.disturbance.inner,
-            &mut self.xst,
-            &mut self.tst,
-        );
+        let dist = TepDisturbances::compute(self.time, &self.disturbance_flags, &self.disturbance_step_magnitudes, &mut self.disturbance.inner, &mut self.mole_fractions, &mut self.stream_temperatures);
 
         // 2. Termodinâmica de cada unidade (depende do estado e das constantes)
-        let reactor = TepReactor::compute_thermo(
-            &state[0..9],
-            dist.reaction_factor_1,
-            dist.reaction_factor_2,
-            self.time,
-            &self.constants,
-        );
+        let reactor = TepReactor::compute_thermo(&state[0..9], dist.reaction_factor_1, dist.reaction_factor_2, self.time, &self.constants);
         let separator = TepSeparator::compute_thermo(&state[9..18], reactor.temperature, &self.constants);
         let stripper  = TepStripper::compute_thermo(&state[18..27], separator.temperature, &self.constants);
         let compressor = TepCompressor::compute_thermo(&state[27..36], separator.temperature, &self.constants);
 
-        // 3. Fluxos (depende da termodinâmica + vpos das válvulas)
+        // 3. Fluxos (depende da termodinâmica + valve_positions das válvulas)
         let flows = TepFlows::compute(
             &reactor,                // pressões, temperaturas e frações do reator
             &separator,              // pressões, temperaturas e frações do separador
             &stripper,               // pressões, temperaturas e frações do stripper
             &compressor,             // pressões, temperaturas e frações do compressor
-            &mut self.xst,           // composições dos streams (completadas aqui dentro)
-            &mut self.tst,           // temperaturas dos streams (completadas aqui dentro)
-            &mut self.sfr,           // fatores de split vapor/líquido do stripper
-            &vpos,                   // posições dos atuadores (do vetor de estado)
-            &self.idv,               // flags de distúrbio ativos (IDV 1–20)
+            &mut self.mole_fractions, // composições dos streams (completadas aqui dentro)
+            &mut self.stream_temperatures,           // temperaturas dos streams (completadas aqui dentro)
+            &mut self.stripper_split_fractions,           // fatores de split vapor/líquido do stripper
+            &valve_positions,                   // posições dos atuadores (do vetor de estado)
+            &self.disturbance_flags,               // flags de distúrbio ativos (IDV 1–20)
             &self.constants,         // constantes termodinâmicas e ranges de válvula
             self.time,               // tempo atual (para distúrbios dinâmicos)
             &self.disturbance.inner, // estado dos distúrbios cúbicos (IDV 16/17/18)
         );
 
         // 4. Transferência de calor (depende dos fluxos + temperaturas de resfriamento)
-        let heat = TepHeat::compute(
-            &reactor,
-            &stripper,
-            &flows,
-            reactor_cw_return,
-            separator_cw_return,
-            reactor.temperature,
-            self.time,
-            &self.disturbance.inner,
-        );
+        let heat = TepHeat::compute(&reactor, &stripper, &flows, reactor_cw_return, separator_cw_return, reactor.temperature, self.time, &self.disturbance.inner);
 
         // 5. Medições + shutdown
-        let shutdown = TepMeasurements::compute(
-            &reactor,
-            &separator,
-            &stripper,
-            &compressor,
-            &flows,
-            &heat,
-            reactor_cw_return,
-            separator_cw_return,
-            &mut self.xmeas,
-        );
+        let shutdown = TepMeasurements::compute(&reactor, &separator, &stripper, &compressor, &flows, &heat, reactor_cw_return, separator_cw_return, &mut self.process_measurements);
         if shutdown {
             return vec![0.0; 50];
         }
@@ -280,7 +278,4 @@ impl DynamicModel for TennesseeEastmanModel {
         yp
     }
 
-    fn name(&self) -> &'static str {
-        "TennesseeEastmanModel"
-    }
 }

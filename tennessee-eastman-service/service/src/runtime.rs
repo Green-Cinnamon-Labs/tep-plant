@@ -3,15 +3,31 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
 
-use te_core::plant::Plant;
-use te_core::params::Params;
+// TODO(refactor-core): `te_core::plant::Plant` e `te_core::params::Params` foram removidos
+// durante a refatoração do core (issue #58 / #55). O corpo original de `run()` dependia
+// deles (Plant/Bus/SimulationSnapshot) e foi temporariamente comentado abaixo até a nova
+// API do core ficar pronta. Isso está ERRADO/incompleto — o loop de simulação não roda.
+// use te_core::plant::Plant;
+// use te_core::params::Params;
 
 use crate::config::Config;
-use crate::shared::{SharedPlant, MetricsSnapshot, AlarmSnapshot};
-use crate::dashboard::Dashboard;
-use crate::resolver::resolve;
+use crate::shared::SharedPlant;
+// use crate::shared::{MetricsSnapshot, AlarmSnapshot}; // TODO(refactor-core): reativar junto com o loop abaixo
+// use crate::dashboard::Dashboard; // TODO(refactor-core): reativar junto com o loop abaixo
+// use crate::resolver::resolve; // TODO(refactor-core): reativar junto com o loop abaixo
 
+// TODO(refactor-core): stub temporário — não faz nada além de não quebrar a build.
+// O corpo real está comentado logo abaixo, preservado para quando Plant/Params/
+// SimulationSnapshot forem reescritos com a nova API do core.
 pub fn run(config: Config, shared: SharedPlant) {
+    let _ = (config, shared);
+    eprintln!("[runtime] run() está desativado (TODO refactor-core): loop de simulação não está rodando");
+}
+
+/*
+TODO(refactor-core): corpo original de `run()`, preservado para referência.
+
+pub fn run_original(config: Config, shared: SharedPlant) {
 
     let resolved = resolve(&config);
 
@@ -131,7 +147,7 @@ pub fn run(config: Config, shared: SharedPlant) {
                 for &idx in &[2usize, 3, 4] {
                     let idv_num = idx + 1;
                     if let Some(&mag) = state.idv_magnitudes.get(&idv_num) {
-                        plant.model.set_idv_step_mag(idx, mag);
+                        plant.model.set_disturbance_step_magnitude(idx, mag);
                     }
                 }
             }
@@ -269,7 +285,9 @@ pub fn run(config: Config, shared: SharedPlant) {
         }
     }
 }
+*/
 
+#[allow(dead_code)]
 fn write_snapshot_toml(path: &str, state: &[f64], t_h: f64) {
     let file = File::create(path).expect("Failed to create snapshot file");
     let mut w = BufWriter::new(file);

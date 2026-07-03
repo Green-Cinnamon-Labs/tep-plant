@@ -8,20 +8,20 @@ Given molar fractions `z[8]` and temperature `t` (°C), returns the total enthal
   2 = vapor with ideal gas correction (PV)
 Direct translation of SUBROUTINE TESUB1 from teprob.f
 */
-pub fn mixture_enthalpy(z: &[f64; 8], t: f64, ity: i32, c: &TepConstants) -> f64 {
+pub fn mixture_enthalpy(z: &[f64; 8], t: f64, ity: i32, constants: &TepConstants) -> f64 {
     let mut h = 0.0_f64;
 
     if ity == 0 {
         // Liquid: HI = T*(AH + BH*T/2 + CH*T²/3) * 1.8
         for i in 0..8 {
-            let hi = t * (c.ah[i] + c.bh[i] * t / 2.0 + c.ch[i] * t * t / 3.0);
-            h += z[i] * c.xmw[i] * 1.8 * hi;
+            let hi = t * (constants.ah[i] + constants.bh[i] * t / 2.0 + constants.ch[i] * t * t / 3.0);
+            h += z[i] * constants.xmw[i] * 1.8 * hi;
         }
     } else {
         // Vapor: HI = T*(AG + BG*T/2 + CG*T²/3) * 1.8 + AV
         for i in 0..8 {
-            let hi = t * (c.ag[i] + c.bg[i] * t / 2.0 + c.cg[i] * t * t / 3.0);
-            h += z[i] * c.xmw[i] * (1.8 * hi + c.av[i]);
+            let hi = t * (constants.ag[i] + constants.bg[i] * t / 2.0 + constants.cg[i] * t * t / 3.0);
+            h += z[i] * constants.xmw[i] * (1.8 * hi + constants.av[i]);
         }
     }
 
@@ -43,13 +43,13 @@ pub fn temperature_from_enthalpy(
     t_init: f64,
     h_target: f64,
     ity: i32,
-    c: &TepConstants,
+    constants: &TepConstants,
 ) -> f64 {
     let mut t = t_init;
 
     for _ in 0..100 {
-        let h_test = mixture_enthalpy(z, t, ity, c);
-        let dh = enthalpy_derivative(z, t, ity, c);
+        let h_test = mixture_enthalpy(z, t, ity, constants);
+        let dh = enthalpy_derivative(z, t, ity, constants);
         let dt = -(h_test - h_target) / dh;
         t += dt;
         if dt.abs() < 1.0e-12 {
@@ -65,18 +65,18 @@ Used as the Jacobian in the Newton-Raphson loop of
 `temperature_from_enthalpy`.
 Direct translation of SUBROUTINE TESUB3 from teprob.f
 */
-pub fn enthalpy_derivative(z: &[f64; 8], t: f64, ity: i32, c: &TepConstants) -> f64 {
+pub fn enthalpy_derivative(z: &[f64; 8], t: f64, ity: i32, constants: &TepConstants) -> f64 {
     let mut dh = 0.0_f64;
 
     if ity == 0 {
         for i in 0..8 {
-            let dhi = (c.ah[i] + c.bh[i] * t + c.ch[i] * t * t) * 1.8;
-            dh += z[i] * c.xmw[i] * dhi;
+            let dhi = (constants.ah[i] + constants.bh[i] * t + constants.ch[i] * t * t) * 1.8;
+            dh += z[i] * constants.xmw[i] * dhi;
         }
     } else {
         for i in 0..8 {
-            let dhi = (c.ag[i] + c.bg[i] * t + c.cg[i] * t * t) * 1.8;
-            dh += z[i] * c.xmw[i] * dhi;
+            let dhi = (constants.ag[i] + constants.bg[i] * t + constants.cg[i] * t * t) * 1.8;
+            dh += z[i] * constants.xmw[i] * dhi;
         }
     }
 
@@ -95,9 +95,9 @@ pub fn enthalpy_derivative(z: &[f64; 8], t: f64, ity: i32, c: &TepConstants) -> 
 
  Direct translation of SUBROUTINE TESUB4 from teprob.f
 */
-pub fn liquid_density(x: &[f64; 8], t: f64, c: &TepConstants) -> f64 {
+pub fn liquid_density(x: &[f64; 8], t: f64, constants: &TepConstants) -> f64 {
     let v: f64 = (0..8)
-        .map(|i| x[i] * c.xmw[i] / (c.ad[i] + (c.bd[i] + c.cd[i] * t) * t))
+        .map(|i| x[i] * constants.xmw[i] / (constants.ad[i] + (constants.bd[i] + constants.cd[i] * t) * t))
         .sum();
     1.0 / v
 }
