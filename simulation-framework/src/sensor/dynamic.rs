@@ -5,7 +5,7 @@
 // These types model sensors whose output has its own response lag —
 // e.g., a thermocouple or pressure transmitter with first-order dynamics.
 
-use crate::model::DynamicModel;
+// use crate::dynamic_model::DynamicModel;
 
 // ── FirstOrderSensor ──────────────────────────────────────────────────────────
 // Models a sensor with first-order response lag: d(output)/dt = (input - output) / tau
@@ -33,20 +33,20 @@ impl FirstOrderSensor {
     }
 }
 
-impl DynamicModel for FirstOrderSensor {
-    fn state_size(&self) -> usize {
-        1
-    }
-
-    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        let output = state[0];
-        vec![(self.input - output) / self.tau]
-    }
-
-    fn name(&self) -> &'static str {
-        "FirstOrderSensor"
-    }
-}
+// impl DynamicModel for FirstOrderSensor {
+//     fn state_size(&self) -> usize {
+//         1
+//     }
+//
+//     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
+//         let output = state[0];
+//         vec![(self.input - output) / self.tau]
+//     }
+//
+//     fn name(&self) -> &'static str {
+//         "FirstOrderSensor"
+//     }
+// }
 
 // ── SampledSensor ─────────────────────────────────────────────────────────────
 // Models a sampler/analyzer with transport delay.
@@ -78,23 +78,23 @@ impl SampledSensor {
     }
 }
 
-impl DynamicModel for SampledSensor {
-    fn state_size(&self) -> usize {
-        1
-    }
-
-    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        // Zero-order hold: output is constant between samples.
-        // The sample event updates input externally via trigger().
-        let held = state[0];
-        if self.sample_pending {
-            vec![(self.input - held) / 1e-6] // fast step toward new sample
-        } else {
-            vec![0.0]
-        }
-    }
-
-    fn name(&self) -> &'static str {
-        "SampledSensor"
-    }
-}
+// impl DynamicModel for SampledSensor {
+//     fn state_size(&self) -> usize {
+//         1
+//     }
+//
+//     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
+//         // Zero-order hold: output is constant between samples.
+//         // The sample event updates input externally via trigger().
+//         let held = state[0];
+//         if self.sample_pending {
+//             vec![(self.input - held) / 1e-6] // fast step toward new sample
+//         } else {
+//             vec![0.0]
+//         }
+//     }
+//
+//     fn name(&self) -> &'static str {
+//         "SampledSensor"
+//     }
+// }

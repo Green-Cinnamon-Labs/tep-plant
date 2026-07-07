@@ -1,6 +1,6 @@
 // actuator/dynamic.rs
 
-use crate::model::DynamicModel;
+// use crate::dynamic_model::DynamicModel;
 
 // ── Valve ───────────────────────────────────────────────────────────
 // Models a control valve with first-order lag: d(position)/dt = (command - position) / tau
@@ -25,20 +25,20 @@ impl Valve {
     }
 }
 
-impl DynamicModel for Valve {
-    fn state_size(&self) -> usize {
-        1
-    }
-
-    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        let position = state[0];
-        vec![(self.command - position) / self.tau]
-    }
-
-    fn name(&self) -> &'static str {
-        "Valve"
-    }
-}
+// impl DynamicModel for Valve {
+//     fn state_size(&self) -> usize {
+//         1
+//     }
+//
+//     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
+//         let position = state[0];
+//         vec![(self.command - position) / self.tau]
+//     }
+//
+//     fn name(&self) -> &'static str {
+//         "Valve"
+//     }
+// }
 
 // ── Agitator ──────────────────────────────────────────────────────────────────
 // Reactor agitator speed — same first-order dynamics as a valve but
@@ -64,17 +64,17 @@ impl Agitator {
     }
 }
 
-impl DynamicModel for Agitator {
-    fn state_size(&self) -> usize {
-        1
-    }
-
-    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        let speed = state[0];
-        vec![(self.command - speed) / self.tau]
-    }
-
-    fn name(&self) -> &'static str {
-        "Agitator"
-    }
-}
+// impl DynamicModel for Agitator {
+//     fn state_size(&self) -> usize {
+//         1
+//     }
+//
+//     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
+//         let speed = state[0];
+//         vec![(self.command - speed) / self.tau]
+//     }
+//
+//     fn name(&self) -> &'static str {
+//         "Agitator"
+//     }
+// }

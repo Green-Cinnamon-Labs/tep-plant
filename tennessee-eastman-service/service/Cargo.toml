@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-te_core = { path = "../core" }
+te_core = { path = "../tep" }
 ratatui   = "0.28"
 crossterm = "0.28"
 tonic     = "0.12"

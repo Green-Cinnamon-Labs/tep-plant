@@ -5,12 +5,12 @@
 // O orquestrador (TepPlantCore) chama cada um em sequência e injeta outputs
 // de um como inputs do próximo.
 
-use crate::disturbance::cubic::{
+use simulation_framework::disturbance::cubic::{
     eval_disturbance, lcg_rand, update_segment, CubicDisturbanceState,
 };
-use crate::tep::constants::TepConstants;
-use crate::tep::thermo::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
-use crate::tep::ValvePositions;
+use crate::constants::TepConstants;
+use crate::thermo::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
+use crate::model::ValvePositions;
 
 // ─── Constantes físicas ───────────────────────────────────────────────────────
 const REACTOR_VOLUME: f64                   = 1300.0;  // volume total do vaso do reator [m³]

@@ -2,7 +2,7 @@
 
 [workspace]
 members = [
-    "core",
+    "tep",
     "service"
 ]
 resolver = "2"

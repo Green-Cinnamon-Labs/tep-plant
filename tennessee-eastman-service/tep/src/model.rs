@@ -1,4 +1,4 @@
-// core/tep/mod.rs
+// tep/model.rs
 //
 // TennesseeEastmanModel — implementação concreta de DynamicModel para a planta TEP.
 //
@@ -12,18 +12,12 @@
 //   [38..49] — posições das válvulas XMV[0..11]  (Valve, 1 estado cada)
 //   [49]     — velocidade do agitador XMV[12]     (Agitator, 1 estado)
 
-pub mod constants;
-pub mod disturbance_state;
-pub mod initial_state;
-pub mod subsystems;
-pub mod thermo;
-
-use crate::model::DynamicModel;
-use crate::actuator::dynamic::{Agitator, Valve};
-use crate::tep::constants::TepConstants;
-use crate::tep::initial_state::InitialState;
-use crate::tep::disturbance_state::TepDisturbanceState;
-use crate::tep::subsystems::{TepCompressor, TepDisturbances, TepFlows, TepHeat, TepMeasurements, TepReactor, TepSeparator, TepStripper};
+// use simulation_framework::dynamic_model::DynamicModel;
+use simulation_framework::actuator::dynamic::{Agitator, Valve};
+use crate::constants::TepConstants;
+use crate::initial_state::InitialState;
+use crate::disturbance_state::TepDisturbanceState;
+use crate::subsystems::{TepCompressor, TepDisturbances, TepFlows, TepHeat, TepMeasurements, TepReactor, TepSeparator, TepStripper};
 
 // Constantes de tempo τ de cada válvula [h]. Dividido por 3600 porque o integrador
 // usa horas como unidade de tempo, mas os valores físicos originais estão em segundos.
@@ -186,96 +180,96 @@ impl TennesseeEastmanModel {
     }
 }
 
-impl DynamicModel for TennesseeEastmanModel {
-
-    fn state_size(&self) -> usize {
-        50 // 38 química + 11 válvulas + 1 agitador
-    }
-
-    fn name(&self) -> &'static str {
-        "TennesseeEastmanModel"
-    }
-
-    fn set_commands(&mut self, xmv: &[f64]) {
-        for (i, valve) in self.valves.iter_mut().enumerate() {
-            if let Some(&cmd) = xmv.get(i) { valve.set_command(cmd); }
-        }
-        if let Some(&cmd) = xmv.get(11) { self.agitator.set_command(cmd); }
-    }
-
-    fn set_disturbances(&mut self, dv: &[f64]) {
-        for (i, &v) in dv.iter().enumerate().take(20) {
-            self.disturbance_flags[i] = v as i32;
-        }
-    }
-
-    fn advance_time(&mut self, dt: f64) {
-        self.time += dt;
-    }
-
-    fn set_disturbance_step_magnitude(&mut self, idx: usize, mag: f64) {
-        if idx < 20 { self.disturbance_step_magnitudes[idx] = mag; }
-    }
-
-    fn measurements(&self) -> Vec<f64> {
-        self.process_measurements.to_vec()
-    }
-
-    fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
-        
-        let valve_positions = ValvePositions::from_state(state);
-        let reactor_cw_return   = state[36];
-        let separator_cw_return = state[37];
-
-        // 1. Perturbações — atualiza feeds, retorna r1f/r2f/tcwr/tcws
-        let dist = TepDisturbances::compute(self.time, &self.disturbance_flags, &self.disturbance_step_magnitudes, &mut self.disturbance.inner, &mut self.mole_fractions, &mut self.stream_temperatures);
-
-        // 2. Termodinâmica de cada unidade (depende do estado e das constantes)
-        let reactor = TepReactor::compute_thermo(&state[0..9], dist.reaction_factor_1, dist.reaction_factor_2, self.time, &self.constants);
-        let separator = TepSeparator::compute_thermo(&state[9..18], reactor.temperature, &self.constants);
-        let stripper  = TepStripper::compute_thermo(&state[18..27], separator.temperature, &self.constants);
-        let compressor = TepCompressor::compute_thermo(&state[27..36], separator.temperature, &self.constants);
-
-        // 3. Fluxos (depende da termodinâmica + valve_positions das válvulas)
-        let flows = TepFlows::compute(
-            &reactor,                // pressões, temperaturas e frações do reator
-            &separator,              // pressões, temperaturas e frações do separador
-            &stripper,               // pressões, temperaturas e frações do stripper
-            &compressor,             // pressões, temperaturas e frações do compressor
-            &mut self.mole_fractions, // composições dos streams (completadas aqui dentro)
-            &mut self.stream_temperatures,           // temperaturas dos streams (completadas aqui dentro)
-            &mut self.stripper_split_fractions,           // fatores de split vapor/líquido do stripper
-            &valve_positions,                   // posições dos atuadores (do vetor de estado)
-            &self.disturbance_flags,               // flags de distúrbio ativos (IDV 1–20)
-            &self.constants,         // constantes termodinâmicas e ranges de válvula
-            self.time,               // tempo atual (para distúrbios dinâmicos)
-            &self.disturbance.inner, // estado dos distúrbios cúbicos (IDV 16/17/18)
-        );
-
-        // 4. Transferência de calor (depende dos fluxos + temperaturas de resfriamento)
-        let heat = TepHeat::compute(&reactor, &stripper, &flows, reactor_cw_return, separator_cw_return, reactor.temperature, self.time, &self.disturbance.inner);
-
-        // 5. Medições + shutdown
-        let shutdown = TepMeasurements::compute(&reactor, &separator, &stripper, &compressor, &flows, &heat, reactor_cw_return, separator_cw_return, &mut self.process_measurements);
-        if shutdown {
-            return vec![0.0; 50];
-        }
-
-        // 6. Derivadas da química [0..38]
-        let mut yp = vec![0.0f64; 50];
-        yp[0..9].copy_from_slice(&TepReactor::compute_derivatives(&flows, &reactor, heat.reactor_heat));
-        yp[9..18].copy_from_slice(&TepSeparator::compute_derivatives(&flows, heat.separator_heat));
-        yp[18..27].copy_from_slice(&TepStripper::compute_derivatives(&flows, heat.condenser_heat));
-        yp[27..36].copy_from_slice(&TepCompressor::compute_derivatives(&flows));
-        // yp[36], yp[37] (reactor_cw_return, separator_cw_return) — derivada zero (estados externos)
-
-        // 7. Dinâmica dos atuadores — válvulas [38..49] e agitador [49]
-        for (i, valve) in self.valves.iter_mut().enumerate() {
-            yp[38 + i] = valve.dynamics(&state[38 + i..39 + i])[0];
-        }
-        yp[49] = self.agitator.dynamics(&state[49..50])[0];
-
-        yp
-    }
-
-}
+// impl DynamicModel for TennesseeEastmanModel {
+//
+//     fn state_size(&self) -> usize {
+//         50 // 38 química + 11 válvulas + 1 agitador
+//     }
+//
+//     fn name(&self) -> &'static str {
+//         "TennesseeEastmanModel"
+//     }
+//
+//     fn set_commands(&mut self, xmv: &[f64]) {
+//         for (i, valve) in self.valves.iter_mut().enumerate() {
+//             if let Some(&cmd) = xmv.get(i) { valve.set_command(cmd); }
+//         }
+//         if let Some(&cmd) = xmv.get(11) { self.agitator.set_command(cmd); }
+//     }
+//
+//     fn set_disturbances(&mut self, dv: &[f64]) {
+//         for (i, &v) in dv.iter().enumerate().take(20) {
+//             self.disturbance_flags[i] = v as i32;
+//         }
+//     }
+//
+//     fn advance_time(&mut self, dt: f64) {
+//         self.time += dt;
+//     }
+//
+//     fn set_disturbance_step_magnitude(&mut self, idx: usize, mag: f64) {
+//         if idx < 20 { self.disturbance_step_magnitudes[idx] = mag; }
+//     }
+//
+//     fn measurements(&self) -> Vec<f64> {
+//         self.process_measurements.to_vec()
+//     }
+//
+//     fn dynamics(&mut self, state: &[f64]) -> Vec<f64> {
+//
+//         let valve_positions = ValvePositions::from_state(state);
+//         let reactor_cw_return   = state[36];
+//         let separator_cw_return = state[37];
+//
+//         // 1. Perturbações — atualiza feeds, retorna r1f/r2f/tcwr/tcws
+//         let dist = TepDisturbances::compute(self.time, &self.disturbance_flags, &self.disturbance_step_magnitudes, &mut self.disturbance.inner, &mut self.mole_fractions, &mut self.stream_temperatures);
+//
+//         // 2. Termodinâmica de cada unidade (depende do estado e das constantes)
+//         let reactor = TepReactor::compute_thermo(&state[0..9], dist.reaction_factor_1, dist.reaction_factor_2, self.time, &self.constants);
+//         let separator = TepSeparator::compute_thermo(&state[9..18], reactor.temperature, &self.constants);
+//         let stripper  = TepStripper::compute_thermo(&state[18..27], separator.temperature, &self.constants);
+//         let compressor = TepCompressor::compute_thermo(&state[27..36], separator.temperature, &self.constants);
+//
+//         // 3. Fluxos (depende da termodinâmica + valve_positions das válvulas)
+//         let flows = TepFlows::compute(
+//             &reactor,                // pressões, temperaturas e frações do reator
+//             &separator,              // pressões, temperaturas e frações do separador
+//             &stripper,               // pressões, temperaturas e frações do stripper
+//             &compressor,             // pressões, temperaturas e frações do compressor
+//             &mut self.mole_fractions, // composições dos streams (completadas aqui dentro)
+//             &mut self.stream_temperatures,           // temperaturas dos streams (completadas aqui dentro)
+//             &mut self.stripper_split_fractions,           // fatores de split vapor/líquido do stripper
+//             &valve_positions,                   // posições dos atuadores (do vetor de estado)
+//             &self.disturbance_flags,               // flags de distúrbio ativos (IDV 1–20)
+//             &self.constants,         // constantes termodinâmicas e ranges de válvula
+//             self.time,               // tempo atual (para distúrbios dinâmicos)
+//             &self.disturbance.inner, // estado dos distúrbios cúbicos (IDV 16/17/18)
+//         );
+//
+//         // 4. Transferência de calor (depende dos fluxos + temperaturas de resfriamento)
+//         let heat = TepHeat::compute(&reactor, &stripper, &flows, reactor_cw_return, separator_cw_return, reactor.temperature, self.time, &self.disturbance.inner);
+//
+//         // 5. Medições + shutdown
+//         let shutdown = TepMeasurements::compute(&reactor, &separator, &stripper, &compressor, &flows, &heat, reactor_cw_return, separator_cw_return, &mut self.process_measurements);
+//         if shutdown {
+//             return vec![0.0; 50];
+//         }
+//
+//         // 6. Derivadas da química [0..38]
+//         let mut yp = vec![0.0f64; 50];
+//         yp[0..9].copy_from_slice(&TepReactor::compute_derivatives(&flows, &reactor, heat.reactor_heat));
+//         yp[9..18].copy_from_slice(&TepSeparator::compute_derivatives(&flows, heat.separator_heat));
+//         yp[18..27].copy_from_slice(&TepStripper::compute_derivatives(&flows, heat.condenser_heat));
+//         yp[27..36].copy_from_slice(&TepCompressor::compute_derivatives(&flows));
+//         // yp[36], yp[37] (reactor_cw_return, separator_cw_return) — derivada zero (estados externos)
+//
+//         // 7. Dinâmica dos atuadores — válvulas [38..49] e agitador [49]
+//         for (i, valve) in self.valves.iter_mut().enumerate() {
+//             yp[38 + i] = valve.dynamics(&state[38 + i..39 + i])[0];
+//         }
+//         yp[49] = self.agitator.dynamics(&state[49..50])[0];
+//
+//         yp
+//     }
+//
+// }
