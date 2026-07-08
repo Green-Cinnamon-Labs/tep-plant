@@ -1,0 +1,7 @@
+# Workspace na raiz — necessário pra quem depender deste repo via `git` no
+# Cargo.toml (ex.: tep-opcuaServer) conseguir achar o pacote
+# tennessee_eastman_process, que não fica na raiz do repo.
+
+[workspace]
+members = ["tennesseeEastman-process"]
+resolver = "2"

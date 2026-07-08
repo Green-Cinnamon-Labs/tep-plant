@@ -2,15 +2,15 @@
 # Só sabe de 'planta', 'estado', 'entradas', 'saídas', 'parâmetros', 'edos', 'integração'
 
 [package]
-name = "te_core"
+name = "tennessee_eastman_process"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
-name = "te_core"
+name = "tennessee_eastman_process"
 path = "src/lib.rs"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-simulation_framework = { path = "../../simulation-framework" }
+simulation_framework = { git = "https://github.com/Green-Cinnamon-Labs/simulation-framework", branch = "main" }
