@@ -4,10 +4,10 @@
 // input de outro componente (reactor.temperature) — por isso `new()` declara
 // esse `need` em subscribe() além dos `offers`, e guarda o Proxy resolvido
 // (por StateRegistry::resolve(), chamado depois que todo mundo se inscreveu)
-// como campo. evaluate() só lê/escreve via Proxy, nunca por nome.
+// como campo. evaluate() não recebe nada — só lê/escreve via Proxy.
 
 use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::state_registry::{EvaluationState, Proxy, StateRegistry};
+use simulation_framework::state_registry::{Proxy, StateRegistry};
 
 use crate::constants::TepConstants;
 use crate::thermo::{liquid_density, temperature_from_enthalpy};
@@ -17,6 +17,7 @@ const GAS_CONSTANT: f64 = 998.9; // R em [mmHg·m³/(kmol·K)]
 
 pub struct Separator {
     constants: TepConstants,
+    own_state: Vec<Proxy>, // ucvs[0..3] vapor A/B/C, ucls[3..8] líquido D-H, ets[8] entalpia
     reactor_temperature: Proxy,
     temperature: Proxy,
     pressure: Proxy,
@@ -29,13 +30,13 @@ pub struct Separator {
 
 impl Separator {
     pub fn new(registry: &mut StateRegistry) -> Self {
-        let mut offer_keys: Vec<String> = vec![
-            "separator.temperature".into(),
-            "separator.pressure".into(),
-            "separator.liquid_volume".into(),
-            "separator.liquid_density".into(),
-            "separator.total_vapor_kmol".into(),
-        ];
+        let mut offer_keys: Vec<String> = Vec::new();
+        for i in 0..9 { offer_keys.push(format!("separator.state.{i}")); }
+        offer_keys.push("separator.temperature".into());
+        offer_keys.push("separator.pressure".into());
+        offer_keys.push("separator.liquid_volume".into());
+        offer_keys.push("separator.liquid_density".into());
+        offer_keys.push("separator.total_vapor_kmol".into());
         for i in 0..8 { offer_keys.push(format!("separator.liquid_composition.{i}")); }
         for i in 0..8 { offer_keys.push(format!("separator.vapor_composition.{i}")); }
 
@@ -44,14 +45,15 @@ impl Separator {
 
         Self {
             constants: TepConstants::new(),
+            own_state: offered[0..9].to_vec(),
             reactor_temperature: requested[0].clone(),
-            temperature: offered[0].clone(),
-            pressure: offered[1].clone(),
-            liquid_volume: offered[2].clone(),
-            liquid_density: offered[3].clone(),
-            total_vapor_kmol: offered[4].clone(),
-            liquid_composition: offered[5..13].to_vec(),
-            vapor_composition: offered[13..21].to_vec(),
+            temperature: offered[9].clone(),
+            pressure: offered[10].clone(),
+            liquid_volume: offered[11].clone(),
+            liquid_density: offered[12].clone(),
+            total_vapor_kmol: offered[13].clone(),
+            liquid_composition: offered[14..22].to_vec(),
+            vapor_composition: offered[22..30].to_vec(),
         }
     }
 }
@@ -61,14 +63,14 @@ impl DynamicModel for Separator {
         "Separator"
     }
 
-    fn evaluate(&self, state: &[f64], eval: &EvaluationState) {
-        let reactor_temperature = eval.get(&self.reactor_temperature);
+    fn evaluate(&self) {
+        let reactor_temperature = self.reactor_temperature.get();
 
         let mut vapor_moles = [0.0f64; 8];
         let mut liquid_moles = [0.0f64; 8];
-        for i in 0..3 { vapor_moles[i] = state[i]; }
-        for i in 3..8 { liquid_moles[i] = state[i]; }
-        let total_enthalpy = state[8];
+        for i in 0..3 { vapor_moles[i] = self.own_state[i].get(); }
+        for i in 3..8 { liquid_moles[i] = self.own_state[i].get(); }
+        let total_enthalpy = self.own_state[8].get();
 
         let total_liquid_moles: f64 = liquid_moles.iter().sum();
         let mut liquid_composition = [0.0f64; 8];
@@ -96,14 +98,14 @@ impl DynamicModel for Separator {
         for i in 0..8 { vapor_composition[i] = partial_pressures[i] / pressure; }
         let total_vapor_moles = pressure * volume_vapor / GAS_CONSTANT / temperature_k;
 
-        eval.set(&self.temperature, temperature);
-        eval.set(&self.pressure, pressure);
-        eval.set(&self.liquid_volume, volume_liquid);
-        eval.set(&self.liquid_density, density);
-        eval.set(&self.total_vapor_kmol, total_vapor_moles);
+        self.temperature.set(temperature);
+        self.pressure.set(pressure);
+        self.liquid_volume.set(volume_liquid);
+        self.liquid_density.set(density);
+        self.total_vapor_kmol.set(total_vapor_moles);
         for i in 0..8 {
-            eval.set(&self.liquid_composition[i], liquid_composition[i]);
-            eval.set(&self.vapor_composition[i], vapor_composition[i]);
+            self.liquid_composition[i].set(liquid_composition[i]);
+            self.vapor_composition[i].set(vapor_composition[i]);
         }
     }
 }

@@ -7,7 +7,6 @@
 // mesmo motivo dos outros dois.
 
 use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::state_registry::EvaluationState;
 
 pub struct Measurements;
 
@@ -22,7 +21,7 @@ impl DynamicModel for Measurements {
         "Measurements"
     }
 
-    fn evaluate(&self, _state: &[f64], _eval: &EvaluationState) {
+    fn evaluate(&self) {
         todo!("precisa de Reactor+Separator+Stripper+Compressor+Flows+Heat ao mesmo tempo")
     }
 }

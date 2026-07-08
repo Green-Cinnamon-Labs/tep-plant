@@ -6,7 +6,6 @@
 // não existem mais nesse formato).
 
 use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::state_registry::EvaluationState;
 
 pub struct Heat;
 
@@ -21,7 +20,7 @@ impl DynamicModel for Heat {
         "Heat"
     }
 
-    fn evaluate(&self, _state: &[f64], _eval: &EvaluationState) {
+    fn evaluate(&self) {
         todo!("precisa de Reactor+Stripper+Flows ao mesmo tempo — ver comentário em flows.rs")
     }
 }

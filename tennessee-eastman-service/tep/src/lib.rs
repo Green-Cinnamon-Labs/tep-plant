@@ -5,6 +5,7 @@
 // distúrbio cúbico) mora em simulation-framework (crate irmão).
 pub mod compressor;
 pub mod constants;
+pub mod disturbance;
 pub mod disturbance_state;
 pub mod flows;
 pub mod heat;

@@ -1,8 +1,15 @@
 /**simulation-framework/state_registry.rs
 
 StateRegistry (ver docs/issue55_opcua_refactor/plan_refactor.md, seções 1.3,
-6 e 7). Ainda em transição: falta set_current_state() (o commit
-EvaluationState -> CurrentState).
+6 e 7). Guarda dois mundos, sempre distintos:
+  - CurrentState (`current_state`) — o estado real, confirmado, persistido.
+  - EvaluationState (`evaluation_state`) — a cópia de trabalho onde todo
+    Proxy lê/escreve durante uma rodada de avaliação. Pode conter valores
+    "hipotéticos" (chute intermediário de um solver iterativo) até alguém
+    decidir que aquela rodada está ok.
+`commit()` é o commit EvaluationState -> CurrentState — mecânico, só copia. A
+decisão de QUANDO chamar (ex.: depois que um passo do Integrator convergiu)
+não é do StateRegistry, é de quem orquestra a simulação.
 */
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -21,55 +28,45 @@ pub struct StateSlot {
     pub value: f64,
 }
 
-/** Handle compartilhado pra uma posição em `evaluation_state`. Nasce sem
-resolução (`index = usize::MAX`); `StateRegistry::resolve()` escreve o
-índice real nele. Todo clone de um `Proxy` aponta pro mesmo `Cell`, então
-resolver uma vez basta — o componente guarda seu clone desde a inscrição e
-nunca mais precisa perguntar pelo nome de novo.
+/** Handle autossuficiente pra uma posição no buffer de avaliação — carrega o
+buffer compartilhado (`Rc<RefCell<Vec<Cell<f64>>>>`) e o índice (`Rc<Cell<usize>>`)
+juntos, então `get()`/`set()` não precisam de nada externo passado por
+parâmetro. Nasce sem resolução (`index = usize::MAX`);
+`StateRegistry::resolve()` escreve o índice real nele. Todo clone de um
+`Proxy` aponta pro mesmo `Cell`, então resolver uma vez basta — o componente
+guarda seu clone desde a inscrição e nunca mais precisa perguntar pelo nome
+de novo, nem receber o buffer de fora em cada `evaluate()`.
 
 Agnóstico a se o valor por trás é "hipotético" (chute intermediário de um
 solver iterativo) ou "real" (convergido) — só endereça a posição.
 */
 #[derive(Clone)]
 pub struct Proxy {
+    buffer: Rc<RefCell<Vec<Cell<f64>>>>,
     index: Rc<Cell<usize>>,
 }
 
 impl Proxy {
-    fn resolved(index: usize) -> Self {
-        Self { index: Rc::new(Cell::new(index)) }
+    fn resolved(buffer: Rc<RefCell<Vec<Cell<f64>>>>, index: usize) -> Self {
+        Self { buffer, index: Rc::new(Cell::new(index)) }
     }
 
-    fn unresolved() -> Self {
-        Self { index: Rc::new(Cell::new(usize::MAX)) }
+    fn unresolved(buffer: Rc<RefCell<Vec<Cell<f64>>>>) -> Self {
+        Self { buffer, index: Rc::new(Cell::new(usize::MAX)) }
     }
 
-    pub fn get(&self) -> usize {
+    fn index(&self) -> usize {
         let idx = self.index.get();
         debug_assert!(idx != usize::MAX, "Proxy usado antes de StateRegistry::resolve()");
         idx
     }
-}
 
-/** View tipada sobre o `evaluation_state` cru de um `StateRegistry` (seção 8
-do plano). `evaluate()` recebe isso em vez do `Vec<Cell<f64>>` bruto — lê e
-escreve sempre através de um `Proxy` já resolvido, nunca por nome.
-*/
-pub struct EvaluationState<'a> {
-    buf: &'a [Cell<f64>],
-}
-
-impl<'a> EvaluationState<'a> {
-    pub fn new(buf: &'a [Cell<f64>]) -> Self {
-        Self { buf }
+    pub fn get(&self) -> f64 {
+        self.buffer.borrow()[self.index()].get()
     }
 
-    pub fn get(&self, proxy: &Proxy) -> f64 {
-        self.buf[proxy.get()].get()
-    }
-
-    pub fn set(&self, proxy: &Proxy, value: f64) {
-        self.buf[proxy.get()].set(value);
+    pub fn set(&self, value: f64) {
+        self.buffer.borrow()[self.index()].set(value);
     }
 }
 
@@ -79,9 +76,10 @@ pub struct StateRegistry {
     pub current_state: Vec<StateSlot>,
 
     /// Buffer de trabalho de uma rodada de avaliação (seção 8 do plano).
-    /// `Cell`, não `f64` puro, porque `evaluate()` é `&self` e escreve aqui
-    /// via `Proxy`.
-    pub evaluation_state: Vec<Cell<f64>>,
+    /// Compartilhado com todo `Proxy` já emitido — por isso `Rc<RefCell<_>>`
+    /// (a lista cresce durante subscribe(), então precisa de mutabilidade;
+    /// `Cell` por elemento é o que permite `evaluate()` escrever com `&self`).
+    evaluation_state: Rc<RefCell<Vec<Cell<f64>>>>,
 
     /// nome semântico -> posição em `evaluation_state`, preenchido conforme
     /// os outputs vão sendo oferecidos em subscribe().
@@ -96,7 +94,7 @@ impl StateRegistry {
     fn new() -> Self {
         Self {
             current_state: Vec::new(),
-            evaluation_state: Vec::new(),
+            evaluation_state: Rc::new(RefCell::new(Vec::new())),
             index: HashMap::new(),
             pending_requests: Vec::new(),
         }
@@ -113,10 +111,6 @@ impl StateRegistry {
         Rc::new(RefCell::new(Self::new()))
     }
 
-    pub fn evaluation_state(&self) -> EvaluationState<'_> {
-        EvaluationState::new(&self.evaluation_state)
-    }
-
     /// Um DynamicModel se inscreve: `offers` são os nomes dos slots que ele
     /// próprio provê (reservados e resolvidos na hora — a posição já é
     /// conhecida no momento em que a posição é criada); `needs` são as chaves
@@ -125,14 +119,14 @@ impl StateRegistry {
     /// de inscrição entre quem oferece e quem pede.
     pub fn subscribe(&mut self, offers: &[&str], needs: &[&str]) -> (Vec<Proxy>, Vec<Proxy>) {
         let offered = offers.iter().map(|&key| {
-            let idx = self.evaluation_state.len();
-            self.evaluation_state.push(Cell::new(0.0));
+            let idx = self.evaluation_state.borrow().len();
+            self.evaluation_state.borrow_mut().push(Cell::new(0.0));
             self.index.insert(key.to_string(), idx);
-            Proxy::resolved(idx)
+            Proxy::resolved(self.evaluation_state.clone(), idx)
         }).collect();
 
         let requested = needs.iter().map(|&key| {
-            let proxy = Proxy::unresolved();
+            let proxy = Proxy::unresolved(self.evaluation_state.clone());
             self.pending_requests.push((key.to_string(), proxy.clone()));
             proxy
         }).collect();
@@ -155,5 +149,21 @@ impl StateRegistry {
             }
         }
         Ok(())
+    }
+
+    /// Commit EvaluationState -> CurrentState: reconstrói `current_state`
+    /// inteiro a partir do buffer de trabalho atual, usando `index` pra
+    /// recuperar o nome de cada posição. Não decide nada sobre SE deve
+    /// commitar — só copia o que está lá no momento em que é chamado.
+    pub fn commit(&mut self) {
+        let buf = self.evaluation_state.borrow();
+        let mut slots: Vec<StateSlot> = (0..buf.len())
+            .map(|_| StateSlot { key: String::new(), value: 0.0 })
+            .collect();
+        for (key, &idx) in &self.index {
+            slots[idx] = StateSlot { key: key.clone(), value: buf[idx].get() };
+        }
+        drop(buf);
+        self.current_state = slots;
     }
 }

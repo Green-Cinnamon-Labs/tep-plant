@@ -1,10 +1,10 @@
 // tep/compressor.rs
 //
 // Mesmo padrão do Separator/Stripper: precisa de separator.temperature via
-// Proxy.
+// Proxy. evaluate() não recebe nada — só lê/escreve via Proxy.
 
 use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::state_registry::{EvaluationState, Proxy, StateRegistry};
+use simulation_framework::state_registry::{Proxy, StateRegistry};
 
 use crate::constants::TepConstants;
 use crate::thermo::temperature_from_enthalpy;
@@ -14,6 +14,7 @@ const GAS_CONSTANT: f64 = 998.9; // R em [mmHg·m³/(kmol·K)]
 
 pub struct Compressor {
     constants: TepConstants,
+    own_state: Vec<Proxy>, // ucvv[0..8] vapor A-H, etv[8] entalpia
     separator_temperature: Proxy,
     temperature: Proxy,
     pressure: Proxy,
@@ -22,10 +23,10 @@ pub struct Compressor {
 
 impl Compressor {
     pub fn new(registry: &mut StateRegistry) -> Self {
-        let mut offer_keys: Vec<String> = vec![
-            "compressor.temperature".into(),
-            "compressor.pressure".into(),
-        ];
+        let mut offer_keys: Vec<String> = Vec::new();
+        for i in 0..9 { offer_keys.push(format!("compressor.state.{i}")); }
+        offer_keys.push("compressor.temperature".into());
+        offer_keys.push("compressor.pressure".into());
         for i in 0..8 { offer_keys.push(format!("compressor.vapor_composition.{i}")); }
 
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
@@ -33,10 +34,11 @@ impl Compressor {
 
         Self {
             constants: TepConstants::new(),
+            own_state: offered[0..9].to_vec(),
             separator_temperature: requested[0].clone(),
-            temperature: offered[0].clone(),
-            pressure: offered[1].clone(),
-            vapor_composition: offered[2..10].to_vec(),
+            temperature: offered[9].clone(),
+            pressure: offered[10].clone(),
+            vapor_composition: offered[11..19].to_vec(),
         }
     }
 }
@@ -46,12 +48,12 @@ impl DynamicModel for Compressor {
         "Compressor"
     }
 
-    fn evaluate(&self, state: &[f64], eval: &EvaluationState) {
-        let separator_temperature = eval.get(&self.separator_temperature);
+    fn evaluate(&self) {
+        let separator_temperature = self.separator_temperature.get();
 
         let mut vapor_moles = [0.0f64; 8];
-        for i in 0..8 { vapor_moles[i] = state[i]; }
-        let total_enthalpy = state[8];
+        for i in 0..8 { vapor_moles[i] = self.own_state[i].get(); }
+        let total_enthalpy = self.own_state[8].get();
 
         let total_vapor_moles: f64 = vapor_moles.iter().sum();
         let mut vapor_composition = [0.0f64; 8];
@@ -62,10 +64,10 @@ impl DynamicModel for Compressor {
         let temperature_k = temperature + 273.15;
         let pressure = total_vapor_moles * GAS_CONSTANT * temperature_k / COMPRESSOR_VESSEL_VOLUME;
 
-        eval.set(&self.temperature, temperature);
-        eval.set(&self.pressure, pressure);
+        self.temperature.set(temperature);
+        self.pressure.set(pressure);
         for i in 0..8 {
-            eval.set(&self.vapor_composition[i], vapor_composition[i]);
+            self.vapor_composition[i].set(vapor_composition[i]);
         }
     }
 }

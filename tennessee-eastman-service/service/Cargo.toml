@@ -1,5 +1,6 @@
-# Sabe 'quando rodar', 'como rodar', 'onde publicar dados', 'como receber entradas'. 'loop', 'clock', 'interfaces'.
-# Não sabe como a planta funciona internamente.
+# Ponto de entrada: instancia a Simulation e roda. Vai virar servidor OPC-UA
+# mais pra frente — por enquanto, zerado, sem gRPC/dashboard/controllers
+# (isso tudo estava desenhado pra uma arquitetura que não existe mais).
 
 [package]
 name = "te_service"
@@ -8,13 +9,4 @@ edition = "2021"
 
 [dependencies]
 te_core = { path = "../tep" }
-ratatui   = "0.28"
-crossterm = "0.28"
-tonic     = "0.12"
-prost     = "0.13"
-tokio     = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
-
-[build-dependencies]
-tonic-build = "0.12"
-protoc-bin-vendored = "3"
+simulation_framework = { path = "../../simulation-framework" }

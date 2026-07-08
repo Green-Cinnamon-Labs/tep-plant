@@ -1,15 +1,17 @@
 // tep/stripper.rs
 //
 // Mesmo padrão do Separator: precisa de separator.temperature via Proxy.
+// evaluate() não recebe nada — só lê/escreve via Proxy.
 
 use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::state_registry::{EvaluationState, Proxy, StateRegistry};
+use simulation_framework::state_registry::{Proxy, StateRegistry};
 
 use crate::constants::TepConstants;
 use crate::thermo::{liquid_density, temperature_from_enthalpy};
 
 pub struct Stripper {
     constants: TepConstants,
+    own_state: Vec<Proxy>, // uclc[0..8] líquido A-H, etc[8] entalpia
     separator_temperature: Proxy,
     temperature: Proxy,
     liquid_volume: Proxy,
@@ -19,11 +21,11 @@ pub struct Stripper {
 
 impl Stripper {
     pub fn new(registry: &mut StateRegistry) -> Self {
-        let mut offer_keys: Vec<String> = vec![
-            "stripper.temperature".into(),
-            "stripper.liquid_volume".into(),
-            "stripper.liquid_density".into(),
-        ];
+        let mut offer_keys: Vec<String> = Vec::new();
+        for i in 0..9 { offer_keys.push(format!("stripper.state.{i}")); }
+        offer_keys.push("stripper.temperature".into());
+        offer_keys.push("stripper.liquid_volume".into());
+        offer_keys.push("stripper.liquid_density".into());
         for i in 0..8 { offer_keys.push(format!("stripper.liquid_composition.{i}")); }
 
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
@@ -31,11 +33,12 @@ impl Stripper {
 
         Self {
             constants: TepConstants::new(),
+            own_state: offered[0..9].to_vec(),
             separator_temperature: requested[0].clone(),
-            temperature: offered[0].clone(),
-            liquid_volume: offered[1].clone(),
-            liquid_density: offered[2].clone(),
-            liquid_composition: offered[3..11].to_vec(),
+            temperature: offered[9].clone(),
+            liquid_volume: offered[10].clone(),
+            liquid_density: offered[11].clone(),
+            liquid_composition: offered[12..20].to_vec(),
         }
     }
 }
@@ -45,12 +48,12 @@ impl DynamicModel for Stripper {
         "Stripper"
     }
 
-    fn evaluate(&self, state: &[f64], eval: &EvaluationState) {
-        let separator_temperature = eval.get(&self.separator_temperature);
+    fn evaluate(&self) {
+        let separator_temperature = self.separator_temperature.get();
 
         let mut liquid_moles = [0.0f64; 8];
-        for i in 0..8 { liquid_moles[i] = state[i]; }
-        let total_enthalpy = state[8];
+        for i in 0..8 { liquid_moles[i] = self.own_state[i].get(); }
+        let total_enthalpy = self.own_state[8].get();
 
         let total_liquid_moles: f64 = liquid_moles.iter().sum();
         let mut liquid_composition = [0.0f64; 8];
@@ -61,11 +64,11 @@ impl DynamicModel for Stripper {
         let density = liquid_density(&liquid_composition, temperature, &self.constants);
         let volume_liquid = total_liquid_moles / density;
 
-        eval.set(&self.temperature, temperature);
-        eval.set(&self.liquid_volume, volume_liquid);
-        eval.set(&self.liquid_density, density);
+        self.temperature.set(temperature);
+        self.liquid_volume.set(volume_liquid);
+        self.liquid_density.set(density);
         for i in 0..8 {
-            eval.set(&self.liquid_composition[i], liquid_composition[i]);
+            self.liquid_composition[i].set(liquid_composition[i]);
         }
     }
 }
