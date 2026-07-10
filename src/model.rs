@@ -23,8 +23,8 @@
 // new() recebe um `&Snapshot` (condição inicial já carregada por quem
 // chama — não é responsabilidade do modelo saber de onde vem o arquivo) e
 // repassa pra cada subsistema buscar só as chaves que interessam pra ele
-// (ver Reactor::new). Só o Reactor usa isso por enquanto — Separator/
-// Stripper/Compressor ainda nascem sem condição inicial.
+// (ver Reactor::new/Separator::new). Stripper/Compressor ainda nascem sem
+// condição inicial.
 
 use simulation_framework::dynamic_model::{CompositeDynamicModel, DynamicModel};
 use simulation_framework::snapshot::Snapshot;
@@ -45,7 +45,7 @@ impl TennesseeEastmanModel {
         let mut tep = Self { models: Vec::new(), sensors: Vec::new() };
 
         tep.add_dynamic(Box::new(Reactor::new(registry, initial)));
-        tep.add_dynamic(Box::new(Separator::new(registry)));
+        tep.add_dynamic(Box::new(Separator::new(registry, initial)));
         tep.add_dynamic(Box::new(Stripper::new(registry)));
         tep.add_dynamic(Box::new(Compressor::new(registry)));
 

@@ -1,26 +1,27 @@
 // tep/reactor.rs
-//
-// Reactor como DynamicModel real. É o único dos 7 subsistemas químicos
-// (Reactor/Separator/Stripper/Compressor/Flows/Heat/Measurements) que não
-// depende de dado de outro componente pra calcular sua termodinâmica.
-//
-// Se inscreve no StateRegistry uma única vez, em new() — cada slot que
-// oferece (inclusive o próprio estado, "reactor.state.{i}") vira um Proxy
-// guardado como campo. evaluate() não recebe nada: só lê/escreve nesses
-// Proxys, nunca por nome (ver plan_refactor.md, seções 5.3, 7).
-//
-// reaction_factor_1/2 agora são `needs` de verdade (Disturbance, IDV 13) —
-// não são mais valores nominais fixos.
-//
-// Simplificação temporária que continua: seed do Newton-Raphson de
-// temperatura fixo em 120.0 — o valor exato não muda a raiz encontrada, só a
-// convergência; o código original só usava esse valor em t=0, mas `time` não
-// está disponível aqui (evaluate() não recebe parâmetro nenhum).
-//
-// As derivadas reais de estado (yp) dependem de FlowsOut (que precisa dos
-// quatro subsistemas termodinâmicos ao mesmo tempo) — por isso ainda não são
-// oferecidas como slot; só os valores termodinâmicos (e o estado próprio,
-// lido de volta) são reais.
+
+/** [REVISADO] | Reactor como DynamicModel real. É o único dos 7 subsistemas químicos
+(Reactor/Separator/Stripper/Compressor/Flows/Heat/Measurements) que não
+depende de dado de outro componente pra calcular sua termodinâmica.
+
+Se inscreve no StateRegistry uma única vez, em new() — cada slot que
+oferece (inclusive o próprio estado, "reactor.state.{i}") vira um Proxy
+guardado como campo. evaluate() não recebe nada: só lê/escreve nesses
+Proxys, nunca por nome (ver plan_refactor.md, seções 5.3, 7).
+
+reaction_factor_1/2 agora são `needs` de verdade (Disturbance, IDV 13) —
+não são mais valores nominais fixos.
+
+Simplificação temporária que continua: seed do Newton-Raphson de
+temperatura fixo em 120.0 — o valor exato não muda a raiz encontrada, só a
+convergência; o código original só usava esse valor em t=0, mas `time` não
+está disponível aqui (evaluate() não recebe parâmetro nenhum).
+
+As derivadas reais de estado (yp) dependem de FlowsOut (que precisa dos
+quatro subsistemas termodinâmicos ao mesmo tempo) — por isso ainda não são
+oferecidas como slot; só os valores termodinâmicos (e o estado próprio,
+lido de volta) são reais.
+*/
 
 use simulation_framework::dynamic_model::DynamicModel;
 use simulation_framework::snapshot::Snapshot;
@@ -57,13 +58,7 @@ pub struct Reactor {
 }
 
 impl Reactor {
-    /// `initial` é um `Snapshot` já carregado (ex.: de um TOML de
-    /// condição inicial) — busca aqui só as chaves que o Reactor precisa
-    /// pro próprio estado (`state.reactor_vapor.{A..H}`, `state.reactor.energy`).
-    /// Chave ausente vira `0.0` — sem isso, `own_state` nasceria em `0.0`
-    /// de qualquer forma (default do slot em `subscribe()`), então omitir
-    /// uma chave no TOML não é erro, só significa "sem condição inicial
-    /// pra esse componente".
+
     pub fn new(registry: &mut StateRegistry, initial: &Snapshot) -> Self {
 
         // cria a lista vazia que vai acumular todas as chaves a oferecer
@@ -255,9 +250,15 @@ impl DynamicModel for Reactor {
             self.reaction_rates[i].set(reaction_rates[i]);
         }
 
-        // TODO: derivadas reais precisam de FlowsOut (component_flows[6]/[7],
-        // stream_enthalpies[6]/[7]) — Flows precisa dos 4 subsistemas ao mesmo
-        // tempo. Ainda não oferecidas como slot.
+        // [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp —
+        // quanto own_state muda por tempo) não é calculada aqui. Quem
+        // calcula é `Flows`, uma DynamicModel separada que roda depois
+        // deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao
+        // mesmo tempo, necessário pra saber o que entra/sai daqui) —
+        // `Flows::evaluate()` escreve direto nos slots de derivada deste
+        // componente. Este `evaluate()` só produz valores termodinâmicos
+        // derivados do estado atual (temperatura, pressão, composição
+        // etc.), nunca a derivada do estado em si.
     }
 }
 

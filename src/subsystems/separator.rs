@@ -1,12 +1,13 @@
 // tep/separator.rs
-//
-// Separator como DynamicModel real. Diferente do Reactor, precisa de um
-// input de outro componente (reactor.temperature) — por isso `new()` declara
-// esse `need` em subscribe() além dos `offers`, e guarda o Proxy resolvido
-// (por StateRegistry::resolve(), chamado depois que todo mundo se inscreveu)
-// como campo. evaluate() não recebe nada — só lê/escreve via Proxy.
 
+/** [REVISADO] | Separator como DynamicModel real. Diferente do Reactor, precisa de um
+input de outro componente (reactor.temperature) — por isso `new()` declara
+esse `need` em subscribe() além dos `offers`, e guarda o Proxy resolvido
+(por StateRegistry::resolve(), chamado depois que todo mundo se inscreveu)
+como campo. evaluate() não recebe nada — só lê/escreve via Proxy.
+*/
 use simulation_framework::dynamic_model::DynamicModel;
+use simulation_framework::snapshot::Snapshot;
 use simulation_framework::state_registry::{Proxy, StateRegistry};
 
 use crate::physics::constants::TepConstants;
@@ -29,19 +30,62 @@ pub struct Separator {
 }
 
 impl Separator {
-    pub fn new(registry: &mut StateRegistry) -> Self {
+
+    pub fn new(registry: &mut StateRegistry, initial: &Snapshot) -> Self {
         let mut offer_keys: Vec<String> = Vec::new();
-        for i in 0..9 { offer_keys.push(format!("separator.state.{i}")); }
+
+        // Estado próprio (9 números): 3 componentes leves em vapor (A,B,C) +
+        // 5 componentes pesados em líquido (D-H) + entalpia total do vaso.
+        offer_keys.push("separator.state.vapor_a".into());
+        offer_keys.push("separator.state.vapor_b".into());
+        offer_keys.push("separator.state.vapor_c".into());
+        offer_keys.push("separator.state.liquid_d".into());
+        offer_keys.push("separator.state.liquid_e".into());
+        offer_keys.push("separator.state.liquid_f".into());
+        offer_keys.push("separator.state.liquid_g".into());
+        offer_keys.push("separator.state.liquid_h".into());
+        offer_keys.push("separator.state.enthalpy".into());
+
         offer_keys.push("separator.temperature".into());
         offer_keys.push("separator.pressure".into());
         offer_keys.push("separator.liquid_volume".into());
         offer_keys.push("separator.liquid_density".into());
         offer_keys.push("separator.total_vapor_kmol".into());
-        for i in 0..8 { offer_keys.push(format!("separator.liquid_composition.{i}")); }
-        for i in 0..8 { offer_keys.push(format!("separator.vapor_composition.{i}")); }
+
+        // Composição líquida, um valor por componente (A-H).
+        offer_keys.push("separator.liquid_composition.a".into());
+        offer_keys.push("separator.liquid_composition.b".into());
+        offer_keys.push("separator.liquid_composition.c".into());
+        offer_keys.push("separator.liquid_composition.d".into());
+        offer_keys.push("separator.liquid_composition.e".into());
+        offer_keys.push("separator.liquid_composition.f".into());
+        offer_keys.push("separator.liquid_composition.g".into());
+        offer_keys.push("separator.liquid_composition.h".into());
+
+        // Composição de vapor, um valor por componente (A-H).
+        offer_keys.push("separator.vapor_composition.a".into());
+        offer_keys.push("separator.vapor_composition.b".into());
+        offer_keys.push("separator.vapor_composition.c".into());
+        offer_keys.push("separator.vapor_composition.d".into());
+        offer_keys.push("separator.vapor_composition.e".into());
+        offer_keys.push("separator.vapor_composition.f".into());
+        offer_keys.push("separator.vapor_composition.g".into());
+        offer_keys.push("separator.vapor_composition.h".into());
 
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
         let (offered, requested) = registry.subscribe(&offer_refs, &["reactor.temperature"]);
+
+        // Semeia o estado próprio com a condição inicial recebida — mesma
+        // ordem de offer_keys: vapor A,B,C, líquido D-H, entalpia.
+        offered[0].set(initial.get("state.separator_vapor.A").unwrap_or(0.0));
+        offered[1].set(initial.get("state.separator_vapor.B").unwrap_or(0.0));
+        offered[2].set(initial.get("state.separator_vapor.C").unwrap_or(0.0));
+        offered[3].set(initial.get("state.separator_vapor.D").unwrap_or(0.0));
+        offered[4].set(initial.get("state.separator_vapor.E").unwrap_or(0.0));
+        offered[5].set(initial.get("state.separator_vapor.F").unwrap_or(0.0));
+        offered[6].set(initial.get("state.separator_vapor.G").unwrap_or(0.0));
+        offered[7].set(initial.get("state.separator_vapor.H").unwrap_or(0.0));
+        offered[8].set(initial.get("state.separator.energy").unwrap_or(0.0));
 
         Self {
             constants: TepConstants::new(),
@@ -107,5 +151,52 @@ impl DynamicModel for Separator {
             self.liquid_composition[i].set(liquid_composition[i]);
             self.vapor_composition[i].set(vapor_composition[i]);
         }
+
+        // [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp —
+        // quanto own_state muda por tempo) não é calculada aqui. Quem
+        // calcula é `Flows`, uma DynamicModel separada que roda depois
+        // deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao
+        // mesmo tempo, necessário pra saber o que entra/sai daqui) —
+        // `Flows::evaluate()` escreve direto nos slots de derivada deste
+        // componente. Este `evaluate()` só produz valores termodinâmicos
+        // derivados do estado atual (temperatura, pressão, composição
+        // etc.), nunca a derivada do estado em si.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_seeds_own_state_with_initial_condition() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[
+            ("state.separator_vapor.A", 1.0),
+            ("state.separator_vapor.B", 2.0),
+            ("state.separator_vapor.C", 3.0),
+            ("state.separator_vapor.D", 4.0),
+            ("state.separator_vapor.E", 5.0),
+            ("state.separator_vapor.F", 6.0),
+            ("state.separator_vapor.G", 7.0),
+            ("state.separator_vapor.H", 8.0),
+            ("state.separator.energy", 42.0),
+        ]);
+
+        let separator = Separator::new(&mut registry.borrow_mut(), &initial);
+
+        let values: Vec<f64> = separator.own_state.iter().map(Proxy::get).collect();
+        assert_eq!(values, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 42.0]);
+    }
+
+    #[test]
+    fn new_defaults_missing_keys_to_zero() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[]);
+
+        let separator = Separator::new(&mut registry.borrow_mut(), &initial);
+
+        let values: Vec<f64> = separator.own_state.iter().map(Proxy::get).collect();
+        assert_eq!(values, vec![0.0; 9]);
     }
 }

@@ -1,5 +1,5 @@
 // src/bin/tep_plant.rs
-//
+
 // `tep-plant` — a aplicação: monta a Simulation da Tennessee Eastman Plant
 // e configura o adaptador OPC-UA (interface externa de hoje — não é a
 // identidade do binário, só uma forma de expor a simulação). `Simulation`

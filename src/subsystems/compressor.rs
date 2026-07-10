@@ -69,5 +69,15 @@ impl DynamicModel for Compressor {
         for i in 0..8 {
             self.vapor_composition[i].set(vapor_composition[i]);
         }
+
+        // Decisão de modelagem: a derivada real do próprio estado (yp —
+        // quanto own_state muda por tempo) não é calculada aqui. Quem
+        // calcula é `Flows`, uma DynamicModel separada que roda depois
+        // deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao
+        // mesmo tempo, necessário pra saber o que entra/sai daqui) —
+        // `Flows::evaluate()` escreve direto nos slots de derivada deste
+        // componente. Este `evaluate()` só produz valores termodinâmicos
+        // derivados do estado atual (temperatura, pressão, composição
+        // etc.), nunca a derivada do estado em si.
     }
 }
