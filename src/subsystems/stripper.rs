@@ -6,8 +6,8 @@
 use simulation_framework::dynamic_model::DynamicModel;
 use simulation_framework::state_registry::{Proxy, StateRegistry};
 
-use crate::constants::TepConstants;
-use crate::thermo::{liquid_density, temperature_from_enthalpy};
+use crate::physics::constants::TepConstants;
+use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
 
 pub struct Stripper {
     constants: TepConstants,

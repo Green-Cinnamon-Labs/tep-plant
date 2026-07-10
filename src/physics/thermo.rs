@@ -1,4 +1,4 @@
-use crate::constants::TepConstants;
+use super::constants::TepConstants;
 
 /** ## Compute mixture enthalpy.
 Given molar fractions `z[8]` and temperature `t` (°C), returns the total enthalpy of the mixture.

@@ -1,4 +1,4 @@
-// tep/disturbance.rs
+// tep/disturbance/mod.rs
 //
 // Disturbance NÃO implementa DynamicModel — sua dinâmica real depende de
 // `time`, e `evaluate(&self)` não recebe parâmetro nenhum (nem `time` nem
@@ -20,7 +20,8 @@
 use simulation_framework::disturbance::cubic::{eval_disturbance, lcg_rand, update_segment};
 use simulation_framework::state_registry::{Proxy, StateRegistry};
 
-use crate::disturbance_state::TepDisturbanceState;
+pub mod state;
+use state::TepDisturbanceState;
 
 pub struct Disturbance {
     state: TepDisturbanceState,

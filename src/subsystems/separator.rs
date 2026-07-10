@@ -9,8 +9,8 @@
 use simulation_framework::dynamic_model::DynamicModel;
 use simulation_framework::state_registry::{Proxy, StateRegistry};
 
-use crate::constants::TepConstants;
-use crate::thermo::{liquid_density, temperature_from_enthalpy};
+use crate::physics::constants::TepConstants;
+use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
 
 const SEPARATOR_VOLUME: f64 = 3500.0; // volume total do separador vapor/líquido [m³]
 const GAS_CONSTANT: f64 = 998.9; // R em [mmHg·m³/(kmol·K)]

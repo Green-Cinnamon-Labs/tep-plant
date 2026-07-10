@@ -23,10 +23,11 @@
 // lido de volta) são reais.
 
 use simulation_framework::dynamic_model::DynamicModel;
+use simulation_framework::snapshot::Snapshot;
 use simulation_framework::state_registry::{Proxy, StateRegistry};
 
-use crate::constants::TepConstants;
-use crate::thermo::{liquid_density, temperature_from_enthalpy};
+use crate::physics::constants::TepConstants;
+use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
 
 const REACTOR_VOLUME: f64 = 1300.0; // volume total do vaso do reator [m³]
 const GAS_CONSTANT: f64 = 998.9; // R em [mmHg·m³/(kmol·K)]
@@ -56,9 +57,30 @@ pub struct Reactor {
 }
 
 impl Reactor {
-    pub fn new(registry: &mut StateRegistry) -> Self {
+    /// `initial` é um `Snapshot` já carregado (ex.: de um TOML de
+    /// condição inicial) — busca aqui só as chaves que o Reactor precisa
+    /// pro próprio estado (`state.reactor_vapor.{A..H}`, `state.reactor.energy`).
+    /// Chave ausente vira `0.0` — sem isso, `own_state` nasceria em `0.0`
+    /// de qualquer forma (default do slot em `subscribe()`), então omitir
+    /// uma chave no TOML não é erro, só significa "sem condição inicial
+    /// pra esse componente".
+    pub fn new(registry: &mut StateRegistry, initial: &Snapshot) -> Self {
+
+        // cria a lista vazia que vai acumular todas as chaves a oferecer
         let mut offer_keys: Vec<String> = Vec::new();
-        for i in 0..9 { offer_keys.push(format!("reactor.state.{i}")); }
+
+        // Estado próprio (9 números): 3 componentes leves em vapor (A,B,C) +
+        // 5 componentes pesados em líquido (D-H) + entalpia total do vaso.
+        offer_keys.push("reactor.state.vapor_a".into());
+        offer_keys.push("reactor.state.vapor_b".into());
+        offer_keys.push("reactor.state.vapor_c".into());
+        offer_keys.push("reactor.state.liquid_d".into());
+        offer_keys.push("reactor.state.liquid_e".into());
+        offer_keys.push("reactor.state.liquid_f".into());
+        offer_keys.push("reactor.state.liquid_g".into());
+        offer_keys.push("reactor.state.liquid_h".into());
+        offer_keys.push("reactor.state.enthalpy".into());
+
         offer_keys.push("reactor.temperature".into());
         offer_keys.push("reactor.temperature_k".into());
         offer_keys.push("reactor.pressure".into());
@@ -67,13 +89,68 @@ impl Reactor {
         offer_keys.push("reactor.vapor_volume".into());
         offer_keys.push("reactor.total_vapor_kmol".into());
         offer_keys.push("reactor.heat_of_reaction".into());
-        for i in 0..8 { offer_keys.push(format!("reactor.liquid_composition.{i}")); }
-        for i in 0..8 { offer_keys.push(format!("reactor.vapor_composition.{i}")); }
-        for i in 0..8 { offer_keys.push(format!("reactor.vapor_kmol.{i}")); }
-        for i in 0..8 { offer_keys.push(format!("reactor.reaction_rates.{i}")); }
 
+        // Composição líquida, um valor por componente (A-H).
+        offer_keys.push("reactor.liquid_composition.a".into());
+        offer_keys.push("reactor.liquid_composition.b".into());
+        offer_keys.push("reactor.liquid_composition.c".into());
+        offer_keys.push("reactor.liquid_composition.d".into());
+        offer_keys.push("reactor.liquid_composition.e".into());
+        offer_keys.push("reactor.liquid_composition.f".into());
+        offer_keys.push("reactor.liquid_composition.g".into());
+        offer_keys.push("reactor.liquid_composition.h".into());
+
+        // Composição de vapor, um valor por componente (A-H).
+        offer_keys.push("reactor.vapor_composition.a".into());
+        offer_keys.push("reactor.vapor_composition.b".into());
+        offer_keys.push("reactor.vapor_composition.c".into());
+        offer_keys.push("reactor.vapor_composition.d".into());
+        offer_keys.push("reactor.vapor_composition.e".into());
+        offer_keys.push("reactor.vapor_composition.f".into());
+        offer_keys.push("reactor.vapor_composition.g".into());
+        offer_keys.push("reactor.vapor_composition.h".into());
+
+        // Kmol em fase vapor, um valor por componente (A-H).
+        offer_keys.push("reactor.vapor_kmol.a".into());
+        offer_keys.push("reactor.vapor_kmol.b".into());
+        offer_keys.push("reactor.vapor_kmol.c".into());
+        offer_keys.push("reactor.vapor_kmol.d".into());
+        offer_keys.push("reactor.vapor_kmol.e".into());
+        offer_keys.push("reactor.vapor_kmol.f".into());
+        offer_keys.push("reactor.vapor_kmol.g".into());
+        offer_keys.push("reactor.vapor_kmol.h".into());
+
+        // Taxa líquida de consumo/produção por componente (A-H) —
+        // estequiometria das 4 reações, já somada por componente.
+        offer_keys.push("reactor.reaction_rates.a".into());
+        offer_keys.push("reactor.reaction_rates.b".into());
+        offer_keys.push("reactor.reaction_rates.c".into());
+        offer_keys.push("reactor.reaction_rates.d".into());
+        offer_keys.push("reactor.reaction_rates.e".into());
+        offer_keys.push("reactor.reaction_rates.f".into());
+        offer_keys.push("reactor.reaction_rates.g".into());
+        offer_keys.push("reactor.reaction_rates.h".into());
+
+        // converte Vec<String> pra Vec<&str>, formato que subscribe() espera
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
+
+        // registra todas as chaves de uma vez; devolve os Proxys resolvidos
+        // na mesma ordem (segundo retorno, needs, vazio — Reactor não
+        // depende de mais nada)
         let (offered, _) = registry.subscribe(&offer_refs, &[]);
+
+        // Semeia o estado próprio com a condição inicial recebida — mesma
+        // ordem de offer_keys: vapor A,B,C, líquido D-H, entalpia. Chave
+        // ausente no Snapshot vira 0.0 (mesmo default que o slot já teria).
+        offered[0].set(initial.get("state.reactor_vapor.A").unwrap_or(0.0));
+        offered[1].set(initial.get("state.reactor_vapor.B").unwrap_or(0.0));
+        offered[2].set(initial.get("state.reactor_vapor.C").unwrap_or(0.0));
+        offered[3].set(initial.get("state.reactor_vapor.D").unwrap_or(0.0));
+        offered[4].set(initial.get("state.reactor_vapor.E").unwrap_or(0.0));
+        offered[5].set(initial.get("state.reactor_vapor.F").unwrap_or(0.0));
+        offered[6].set(initial.get("state.reactor_vapor.G").unwrap_or(0.0));
+        offered[7].set(initial.get("state.reactor_vapor.H").unwrap_or(0.0));
+        offered[8].set(initial.get("state.reactor.energy").unwrap_or(0.0));
 
         Self {
             constants: TepConstants::new(),
@@ -181,5 +258,42 @@ impl DynamicModel for Reactor {
         // TODO: derivadas reais precisam de FlowsOut (component_flows[6]/[7],
         // stream_enthalpies[6]/[7]) — Flows precisa dos 4 subsistemas ao mesmo
         // tempo. Ainda não oferecidas como slot.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_seeds_own_state_with_initial_condition() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[
+            ("state.reactor_vapor.A", 1.0),
+            ("state.reactor_vapor.B", 2.0),
+            ("state.reactor_vapor.C", 3.0),
+            ("state.reactor_vapor.D", 4.0),
+            ("state.reactor_vapor.E", 5.0),
+            ("state.reactor_vapor.F", 6.0),
+            ("state.reactor_vapor.G", 7.0),
+            ("state.reactor_vapor.H", 8.0),
+            ("state.reactor.energy", 42.0),
+        ]);
+
+        let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
+
+        let values: Vec<f64> = reactor.own_state.iter().map(Proxy::get).collect();
+        assert_eq!(values, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 42.0]);
+    }
+
+    #[test]
+    fn new_defaults_missing_keys_to_zero() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[]);
+
+        let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
+
+        let values: Vec<f64> = reactor.own_state.iter().map(Proxy::get).collect();
+        assert_eq!(values, vec![0.0; 9]);
     }
 }
