@@ -6,7 +6,7 @@
 // shutdown). Física original em _deprecated_2.rs, não portada ainda pelo
 // mesmo motivo dos outros dois.
 
-use simulation_framework::dynamic_model::DynamicModel;
+use monjolo::dynamic_model::DynamicModel;
 
 pub struct Measurements;
 

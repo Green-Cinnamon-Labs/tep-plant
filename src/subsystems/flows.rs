@@ -15,7 +15,7 @@
 // outros: os quatro subsistemas + posições de válvula + flags de distúrbio)
 // e escrever a lógica com eles.
 
-use simulation_framework::dynamic_model::DynamicModel;
+use monjolo::dynamic_model::DynamicModel;
 
 pub struct Flows;
 

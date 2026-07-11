@@ -4,12 +4,12 @@
 #
 # O binário `tep-plant` (`src/bin/tep_plant.rs`) é a aplicação de verdade:
 # monta a Simulation, declara sensores/atuadores e configura o OPC-UA — por
-# isso `simulation_framework` com a feature `opcua` é dependência normal do
+# isso `monjolo` com a feature `opcua` é dependência normal do
 # pacote (usada só pelo binário, não pela lib). Não precisa de `tokio`
 # direto: `Simulation::run_model()` cria e possui o runtime tokio por
 # dentro — o binário nunca vê `async`/`.await`.
 #
-# TEMPORÁRIO: simulation_framework aponta pra path local, não pro `git` de
+# TEMPORÁRIO: monjolo aponta pra path local, não pro `git` de
 # origem — precisa enxergar Sensor/IoImage/Simulation::add_sensor/IoImage/
 # opcua_adapter/snapshot (o carregador genérico de condição inicial, seção
 # 11.9 do plano), que ainda não foram commitados/enviados ao repositório
@@ -19,7 +19,7 @@
 # StateRegistry no grafo de dependências.
 #
 # serde/toml saíram daqui — não sabe mais parsear TOML sozinho, é o
-# simulation_framework::snapshot::Snapshot que faz isso agora (genérico,
+# monjolo::snapshot::Snapshot que faz isso agora (genérico,
 # não específico do TEP).
 
 [package]
@@ -36,4 +36,4 @@ name = "tep-plant"
 path = "src/bin/tep_plant.rs"
 
 [dependencies]
-simulation_framework = { path = "../simulation-framework", features = ["opcua"] }
+monjolo = { path = "../monjolo", features = ["opcua"] }

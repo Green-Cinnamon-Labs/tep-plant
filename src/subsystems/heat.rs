@@ -5,7 +5,7 @@
 // em _deprecated_2.rs, não portada ainda pelo mesmo motivo (tipos de entrada
 // não existem mais nesse formato).
 
-use simulation_framework::dynamic_model::DynamicModel;
+use monjolo::dynamic_model::DynamicModel;
 
 pub struct Heat;
 

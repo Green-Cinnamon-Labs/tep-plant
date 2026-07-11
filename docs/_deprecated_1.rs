@@ -20,8 +20,8 @@
 // //   [38..49] — posições das válvulas XMV[0..11]  (Valve, 1 estado cada)
 // //   [49]     — velocidade do agitador XMV[12]     (Agitator, 1 estado)
 //
-// // use simulation_framework::dynamic_model::DynamicModel;
-// use simulation_framework::actuator::dynamic::{Agitator, Valve};
+// // use monjolo::dynamic_model::DynamicModel;
+// use monjolo::actuator::dynamic::{Agitator, Valve};
 // use crate::constants::TepConstants;
 // use crate::initial_state::InitialState;
 // use crate::disturbance_state::TepDisturbanceState;

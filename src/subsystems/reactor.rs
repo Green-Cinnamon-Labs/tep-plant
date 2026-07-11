@@ -23,9 +23,9 @@ oferecidas como slot; só os valores termodinâmicos (e o estado próprio,
 lido de volta) são reais.
 */
 
-use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::snapshot::Snapshot;
-use simulation_framework::state_registry::{Proxy, StateRegistry};
+use monjolo::dynamic_model::DynamicModel;
+use monjolo::snapshot::Snapshot;
+use monjolo::state_registry::{Proxy, StateRegistry};
 
 use crate::physics::constants::TepConstants;
 use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};

@@ -6,9 +6,9 @@ esse `need` em subscribe() além dos `offers`, e guarda o Proxy resolvido
 (por StateRegistry::resolve(), chamado depois que todo mundo se inscreveu)
 como campo. evaluate() não recebe nada — só lê/escreve via Proxy.
 */
-use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::snapshot::Snapshot;
-use simulation_framework::state_registry::{Proxy, StateRegistry};
+use monjolo::dynamic_model::DynamicModel;
+use monjolo::snapshot::Snapshot;
+use monjolo::state_registry::{Proxy, StateRegistry};
 
 use crate::physics::constants::TepConstants;
 use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};

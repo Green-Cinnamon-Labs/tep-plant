@@ -17,8 +17,8 @@
 // 8-11 do teprob.f), só a leitura (block 12) está reduzida ao que já é
 // consumido.
 
-use simulation_framework::disturbance::cubic::{eval_disturbance, lcg_rand, update_segment};
-use simulation_framework::state_registry::{Proxy, StateRegistry};
+use monjolo::disturbance::cubic::{eval_disturbance, lcg_rand, update_segment};
+use monjolo::state_registry::{Proxy, StateRegistry};
 
 pub mod state;
 use state::TepDisturbanceState;

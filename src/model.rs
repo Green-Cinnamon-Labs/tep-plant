@@ -26,9 +26,9 @@
 // (ver Reactor::new/Separator::new). Stripper/Compressor ainda nascem sem
 // condição inicial.
 
-use simulation_framework::dynamic_model::{CompositeDynamicModel, DynamicModel};
-use simulation_framework::snapshot::Snapshot;
-use simulation_framework::state_registry::StateRegistry;
+use monjolo::dynamic_model::{CompositeDynamicModel, DynamicModel};
+use monjolo::snapshot::Snapshot;
+use monjolo::state_registry::StateRegistry;
 
 use crate::subsystems::compressor::Compressor;
 use crate::subsystems::reactor::Reactor;

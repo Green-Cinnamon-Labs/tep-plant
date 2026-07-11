@@ -15,7 +15,7 @@
 // // O orquestrador (TepPlantCore) chama cada um em sequência e injeta outputs
 // // de um como inputs do próximo.
 // 
-// use simulation_framework::disturbance::cubic::{
+// use monjolo::disturbance::cubic::{
 //     eval_disturbance, lcg_rand, update_segment, CubicDisturbanceState,
 // };
 // use crate::constants::TepConstants;

@@ -3,8 +3,8 @@
 // Só o que é específico do TEP mora aqui. Framework de simulação genérico
 // (DynamicModel, StateRegistry, Integrator, atuador/sensor de 1ª ordem,
 // distúrbio cúbico, e agora também o carregador genérico de condição
-// inicial — `simulation_framework::snapshot::Snapshot`) mora em
-// simulation-framework (crate irmão).
+// inicial — `monjolo::snapshot::Snapshot`) mora em
+// monjolo (crate irmão).
 //
 // Organização de pastas: subsystems/ (os 7 blocos químicos), disturbance/
 // (Disturbance + seu estado interno), physics/ (constantes e correlações

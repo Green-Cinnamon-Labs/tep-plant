@@ -1,6 +1,6 @@
 // dynamics/tep/disturbance_state.rs
 
-use simulation_framework::disturbance::cubic::{CubicDisturbanceState, DisturbanceChannel};
+use monjolo::disturbance::cubic::{CubicDisturbanceState, DisturbanceChannel};
 
 /** ## TEP-specific disturbance state.
 

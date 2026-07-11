@@ -21,10 +21,10 @@
  Roda com: cargo run --bin tep-plant
  */
 
-use simulation_framework::adapter::AdapterConfig;
-use simulation_framework::numerical_method::NumericalMethod;
-use simulation_framework::simulation::Simulation;
-use simulation_framework::snapshot::Snapshot;
+use monjolo::adapter::AdapterConfig;
+use monjolo::numerical_method::NumericalMethod;
+use monjolo::simulation::Simulation;
+use monjolo::snapshot::Snapshot;
 use tennessee_eastman_process::model::TennesseeEastmanModel;
 
 const OPCUA_ENDPOINT: &str = "opc.tcp://0.0.0.0:4840/tep/server/";

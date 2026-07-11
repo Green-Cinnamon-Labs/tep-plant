@@ -3,8 +3,8 @@
 // Mesmo padrão do Separator: precisa de separator.temperature via Proxy.
 // evaluate() não recebe nada — só lê/escreve via Proxy.
 
-use simulation_framework::dynamic_model::DynamicModel;
-use simulation_framework::state_registry::{Proxy, StateRegistry};
+use monjolo::dynamic_model::DynamicModel;
+use monjolo::state_registry::{Proxy, StateRegistry};
 
 use crate::physics::constants::TepConstants;
 use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
