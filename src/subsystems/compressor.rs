@@ -4,6 +4,7 @@
 // Proxy. evaluate() não recebe nada — só lê/escreve via Proxy.
 
 use monjolo::dynamic_model::DynamicModel;
+use monjolo::snapshot::Snapshot;
 use monjolo::state_registry::{Proxy, StateRegistry};
 
 use crate::physics::constants::TepConstants;
@@ -22,7 +23,7 @@ pub struct Compressor {
 }
 
 impl Compressor {
-    pub fn new(registry: &mut StateRegistry) -> Self {
+    pub fn new(registry: &mut StateRegistry, initial: &Snapshot) -> Self {
         let mut offer_keys: Vec<String> = Vec::new();
         for i in 0..9 { offer_keys.push(format!("compressor.state.{i}")); }
         offer_keys.push("compressor.temperature".into());
@@ -31,6 +32,19 @@ impl Compressor {
 
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
         let (offered, requested) = registry.subscribe(&offer_refs, &["separator.temperature"]);
+
+        // Semeia o estado próprio com a condição inicial recebida — mesma
+        // ordem de offer_keys: vapor A-H, entalpia. Chave ausente no
+        // Snapshot vira 0.0 (mesmo default que o slot já teria).
+        offered[0].set(initial.get("state.compressor_vapor.A").unwrap_or(0.0));
+        offered[1].set(initial.get("state.compressor_vapor.B").unwrap_or(0.0));
+        offered[2].set(initial.get("state.compressor_vapor.C").unwrap_or(0.0));
+        offered[3].set(initial.get("state.compressor_vapor.D").unwrap_or(0.0));
+        offered[4].set(initial.get("state.compressor_vapor.E").unwrap_or(0.0));
+        offered[5].set(initial.get("state.compressor_vapor.F").unwrap_or(0.0));
+        offered[6].set(initial.get("state.compressor_vapor.G").unwrap_or(0.0));
+        offered[7].set(initial.get("state.compressor_vapor.H").unwrap_or(0.0));
+        offered[8].set(initial.get("state.compressor.energy").unwrap_or(0.0));
 
         Self {
             constants: TepConstants::new(),
@@ -79,5 +93,42 @@ impl DynamicModel for Compressor {
         // componente. Este `evaluate()` só produz valores termodinâmicos
         // derivados do estado atual (temperatura, pressão, composição
         // etc.), nunca a derivada do estado em si.
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_seeds_own_state_with_initial_condition() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[
+            ("state.compressor_vapor.A", 1.0),
+            ("state.compressor_vapor.B", 2.0),
+            ("state.compressor_vapor.C", 3.0),
+            ("state.compressor_vapor.D", 4.0),
+            ("state.compressor_vapor.E", 5.0),
+            ("state.compressor_vapor.F", 6.0),
+            ("state.compressor_vapor.G", 7.0),
+            ("state.compressor_vapor.H", 8.0),
+            ("state.compressor.energy", 42.0),
+        ]);
+
+        let compressor = Compressor::new(&mut registry.borrow_mut(), &initial);
+
+        let values: Vec<f64> = compressor.own_state.iter().map(Proxy::get).collect();
+        assert_eq!(values, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 42.0]);
+    }
+
+    #[test]
+    fn new_defaults_missing_keys_to_zero() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[]);
+
+        let compressor = Compressor::new(&mut registry.borrow_mut(), &initial);
+
+        let values: Vec<f64> = compressor.own_state.iter().map(Proxy::get).collect();
+        assert_eq!(values, vec![0.0; 9]);
     }
 }

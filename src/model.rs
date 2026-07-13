@@ -23,8 +23,7 @@
 // new() recebe um `&Snapshot` (condição inicial já carregada por quem
 // chama — não é responsabilidade do modelo saber de onde vem o arquivo) e
 // repassa pra cada subsistema buscar só as chaves que interessam pra ele
-// (ver Reactor::new/Separator::new). Stripper/Compressor ainda nascem sem
-// condição inicial.
+// (ver Reactor::new/Separator::new/Stripper::new/Compressor::new).
 
 use monjolo::dynamic_model::{CompositeDynamicModel, DynamicModel};
 use monjolo::snapshot::Snapshot;
@@ -46,8 +45,8 @@ impl TennesseeEastmanModel {
 
         tep.add_dynamic(Box::new(Reactor::new(registry, initial)));
         tep.add_dynamic(Box::new(Separator::new(registry, initial)));
-        tep.add_dynamic(Box::new(Stripper::new(registry)));
-        tep.add_dynamic(Box::new(Compressor::new(registry)));
+        tep.add_dynamic(Box::new(Stripper::new(registry, initial)));
+        tep.add_dynamic(Box::new(Compressor::new(registry, initial)));
 
         // Só os valores termodinâmicos que já são reais hoje (Reactor/
         // Separator já computam; Flows/Heat/Measurements — o resto do
