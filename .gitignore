@@ -65,3 +65,9 @@ analysis/tep_analysis/.ipynb_checkpoints/
 
 # Simulation artifacts
 tennessee-eastman-service/simulation_log.csv
+
+# OPC-UA runtime (gerado por src/bin/tep_plant.rs ao rodar — certificados/
+# chaves, nunca deveriam ser versionados)
+pki/
+*.der
+*.pem

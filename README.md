@@ -1,41 +1,41 @@
 # Tennessee Eastman Digital Twin Lab
 
-Implementação de um digital twin executável da planta Tennessee Eastman (TEP) em Rust, baseada no modelo clássico de Downs & Vogel (1993).
+Executable digital twin implementation of the Tennessee Eastman plant (TEP) in Rust, based on the classic Downs & Vogel (1993) model.
 
-**Foco:** fidelidade dinâmica, simulação determinística, separação clara entre modelo da planta e camada de controle.
+**Focus:** dynamic fidelity, deterministic simulation, clear separation between the plant model and the control layer.
 
 ---
 
-## Estrutura do Repositório
+## Repository Structure
 
 ```
-tennessee-eastman-process/    ← modelo FORTRAN original (referência)
-tennessee-eastman-service/    ← digital twin em Rust
-  ├── core/                   ← modelo matemático da planta (EDOs, integrador)
-  └── service/                ← executável: runtime, controladores, dashboard
+tennessee-eastman-process/    ← original FORTRAN model (reference)
+tennessee-eastman-service/    ← digital twin in Rust
+  ├── core/                   ← plant's mathematical model (ODEs, integrator)
+  └── service/                ← executable: runtime, controllers, dashboard
        └── src/
-            ├── controllers/  ← trait Controller + ControllerBank + implementações
-            ├── runtime.rs    ← loop de simulação (planta + controle + CSV logger)
-            └── main.rs       ← configuração do experimento e injeção de controladores
-analysis/                     ← pacote Python para visualização (plots dos CSVs)
-docs/                         ← documentação técnica do projeto
+            ├── controllers/  ← Controller trait + ControllerBank + implementations
+            ├── runtime.rs    ← simulation loop (plant + control + CSV logger)
+            └── main.rs       ← experiment configuration and controller injection
+analysis/                     ← Python package for visualization (CSV plots)
+docs/                         ← technical documentation of the project
 ```
 
-## Documentação
+## Documentation
 
-| Arquivo                                                 | Conteúdo                                                                    |
-| ------------------------------------------------------- | --------------------------------------------------------------------------- |
-| [01-premissas.md](docs/01-premissas.md)                 | Premissas de modelagem: válvulas, cold start, ordem do loop, desacoplamento |
-| [02-glossario.md](docs/02-glossario.md)                 | Glossário de termos e nomenclatura do TEP                                   |
-| [03-falhas.md](docs/03-falhas.md)                       | Relatório de falhas e troubleshooting da simulação                          |
-| [04-experimentos.md](docs/04-experimentos.md)           | Registro científico de experimentos (Obs → Hip → Int → Res → Conc)          |
-| [05-disturbios.md](docs/05-disturbios.md)               | Referência dos 20 distúrbios IDV do TEP                                     |
-| [06-controle.md](docs/06-controle.md)                   | Camada de controle: arquitetura injetável, malhas ativas, XMEAS/XMV         |
-| [07-grpc-architecture.md](docs/07-grpc-architecture.md) | API gRPC para controle supervisório via Kubernetes                          |
+| File                                                     | Content                                                                     |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [01-premissas.md](docs/01-premissas.md)                 | Modeling assumptions: valves, cold start, loop order, decoupling |
+| [02-glossario.md](docs/02-glossario.md)                 | Glossary of TEP terms and nomenclature                                   |
+| [03-falhas.md](docs/03-falhas.md)                       | Failure report and simulation troubleshooting                          |
+| [04-experimentos.md](docs/04-experimentos.md)           | Scientific experiment log (Obs → Hyp → Int → Res → Conc)          |
+| [05-disturbios.md](docs/05-disturbios.md)               | Reference for the TEP's 20 IDV disturbances                                     |
+| [06-controle.md](docs/06-controle.md)                   | Control layer: injectable architecture, active loops, XMEAS/XMV         |
+| [07-grpc-architecture.md](docs/07-grpc-architecture.md) | gRPC API for supervisory control via Kubernetes                          |
 
-## Análise e Visualização
+## Analysis and Visualization
 
-O diretório `analysis/` contém o pacote Python `tep-analysis` para gerar plots dos CSVs de simulação. Detalhes em [analysis/README.md](analysis/README.md).
+The `analysis/` directory contains the `tep-analysis` Python package for generating plots from simulation CSVs. Details in [analysis/README.md](analysis/README.md).
 
 ```bash
 cd analysis
@@ -43,19 +43,19 @@ poetry install
 poetry run plot --csv ../tennessee-eastman-service/simulation_log.csv
 ```
 
-## Princípios de Arquitetura
+## Architecture Principles
 
-- A **planta é determinística** e não contém lógica de controle
-- O **controle é injetável** via trait `Controller` + `ControllerBank`
-- O tempo avança de forma explícita via integração numérica (RK4)
-- Controladores são configuráveis sem modificar o runtime
-- Servidor gRPC (tonic, `:50051`) permite observação e reconciliação em runtime
-- Futuramente: gestão externa de controladores via Kubernetes CRDs
+- The **plant is deterministic** and contains no control logic
+- **Control is injectable** via the `Controller` trait + `ControllerBank`
+- Time advances explicitly via numerical integration (RK4)
+- Controllers are configurable without modifying the runtime
+- gRPC server (tonic, `:50051`) allows runtime observation and reconciliation
+- Future: external controller management via Kubernetes CRDs
 
-## Referências
+## References
 
 - Downs, J. J., & Vogel, E. F. (1993). *A Plant-Wide Industrial Process Control Problem*. Computers & Chemical Engineering, 17(3), 245-255.
 
 ## Status
 
-Baseline estável (Exp 10/11, 20h sem ISD). Controladores desacoplados e injetáveis. API gRPC live na `:50051` com StreamMetrics, List/Add/Update/RemoveController e SetDisturbance. Próximo milestone: integrar com Kubernetes operator (`tep-operator`).
+Stable baseline (Exp 10/11, 20h without ISD). Decoupled and injectable controllers. Live gRPC API on `:50051` with StreamMetrics, List/Add/Update/RemoveController, and SetDisturbance. Next milestone: integrate with the Kubernetes operator (`tep-operator`).

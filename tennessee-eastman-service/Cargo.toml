@@ -1,8 +1,0 @@
-# Necessário para definir o workspace do Cargo.
-
-[workspace]
-members = [
-    "core",
-    "service"
-]
-resolver = "2"

@@ -1,0 +1,8 @@
+# Contexto de build não está otimizado ainda (o Dockerfile só copia
+# target/release/tep-plant) — isso só evita subir o óbvio grande/irrelevante.
+.git/
+docs/
+pki/
+target/debug/
+target/*/debug/
+*.pdf
