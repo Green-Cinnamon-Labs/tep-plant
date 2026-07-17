@@ -38,7 +38,7 @@ while event::poll(std::time::Duration::from_millis(0))? {
 Isso descarta todos os eventos pendentes da inicialização do terminal antes de entrar no loop
 de simulação.
 
-Histórico técnico das falhas de simulação encontradas durante o desenvolvimento do digital twin do Tennessee Eastman Process em Rust. Ordenadas da mais recente para a mais antiga.
+Histórico técnico das falhas de simulação encontradas durante o desenvolvimento do sistema ciber-físico (CPS) do Tennessee Eastman Process em Rust. Ordenadas da mais recente para a mais antiga.
 
 ---
 

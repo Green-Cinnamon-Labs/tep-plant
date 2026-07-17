@@ -1,4 +1,4 @@
-# Tennessee Eastman Digital Twin — Premissas
+# Tennessee Eastman CPS — Premissas
 
 ## Sobre válvulas e Atuadores
 

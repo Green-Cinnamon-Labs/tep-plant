@@ -1,6 +1,6 @@
-# Tennessee Eastman Digital Twin Lab
+# Tennessee Eastman CPS Lab
 
-Executable digital twin implementation of the Tennessee Eastman plant (TEP) in Rust, based on the classic Downs & Vogel (1993) model.
+Executable Cyber-Physical System (CPS) implementation of the Tennessee Eastman plant (TEP) in Rust, based on the classic Downs & Vogel (1993) model. Not a "digital twin" — there is no physical TEP plant this simulator mirrors.
 
 **Focus:** dynamic fidelity, deterministic simulation, clear separation between the TEP-specific chemistry and the generic simulation runtime.
 

@@ -1,4 +1,4 @@
-# Camada de Controle do TEP Digital Twin
+# Camada de Controle do TEP CPS
 
 Este documento descreve a arquitetura de controle injetável (implementada no Exp 11) e as ações de controle ativas na planta.
 
