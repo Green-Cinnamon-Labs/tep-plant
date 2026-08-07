@@ -1,21 +1,18 @@
-// tep/disturbance/mod.rs
-//
-// Disturbance NÃO implementa DynamicModel — sua dinâmica real depende de
-// `time`, e `evaluate(&self)` não recebe parâmetro nenhum (nem `time` nem
-// nada mais). Em vez disso, se inscreve no StateRegistry igual qualquer
-// componente (ganha Proxy pros próprios outputs), mas expõe um método
-// próprio, `advance(&mut self, time: f64)`, que quem orquestra a simulação
-// (Simulation) chama diretamente, antes de disparar o `evaluate()` da árvore
-// de DynamicModel — assim Reactor/Flows/Heat já encontram os valores
-// atualizados quando forem ler via `need`.
-//
-// Escopo atual: só os 4 valores de DisturbanceOut (reaction_factor_1/2,
-// reactor/separator_cooling_water_temp) são oferecidos — os canais 0..3
-// (composição/temperatura de feed, que mutavam stream_comps/stream_temps no
-// código original) ainda não têm consumidor (Flows não existe), então não
-// são expostos ainda. As 12 posições continuam avançando por trás (blocks
-// 8-11 do teprob.f), só a leitura (block 12) está reduzida ao que já é
-// consumido.
+/* tep/disturbance/mod.rs */
+
+/** Disturbance NÃO implementa DynamicModel — sua dinâmica real depende de `time`, e
+`evaluate(&self)` não recebe parâmetro nenhum (nem `time` nem nada mais). Em vez disso, se inscreve
+no StateRegistry igual qualquer componente (ganha Proxy pros próprios outputs), mas expõe um método
+próprio, `advance(&mut self, time: f64)`, que quem orquestra a simulação (Simulation) chama
+diretamente, antes de disparar o `evaluate()` da árvore de DynamicModel — assim Reactor/Flows/Heat
+já encontram os valores atualizados quando forem ler via `need`.
+
+Escopo atual: só os 4 valores de DisturbanceOut (reaction_factor_1/2,
+reactor/separator_cooling_water_temp) são oferecidos — os canais 0..3 (composição/temperatura de
+feed, que mutavam stream_comps/stream_temps no código original) ainda não têm consumidor (Flows não
+existe), então não são expostos ainda. As 12 posições continuam avançando por trás (blocks 8-11 do
+teprob.f), só a leitura (block 12) está reduzida ao que já é consumido.
+*/
 
 use monjolo::disturbance::cubic::{eval_disturbance, lcg_rand, update_segment};
 use monjolo::state_registry::{Proxy, StateRegistry};
@@ -63,9 +60,9 @@ impl Disturbance {
         if idx < 20 { self.step_magnitudes[idx] = magnitude; }
     }
 
-    /// Avança os 12 canais cúbicos até `time` e escreve os 4 outputs
-    /// consumidos hoje nos respectivos Proxy. Chamado por quem orquestra a
-    /// simulação, não pelo `evaluate()` de ninguém.
+    /** Avança os 12 canais cúbicos até `time` e escreve os 4 outputs consumidos hoje nos
+    respectivos Proxy. Chamado por quem orquestra a simulação, não pelo `evaluate()` de ninguém.
+    */
     pub fn advance(&mut self, time: f64) {
         let inner = &mut self.state.inner;
 
@@ -74,7 +71,7 @@ impl Disturbance {
             *v = if *v > 0 { 1 } else { 0 };
         }
 
-        // Block 8 — liga/desliga canais conforme flags IDV ativos
+        /* Block 8 — liga/desliga canais conforme flags IDV ativos */
         inner.channels[0].active = flags[7];
         inner.channels[1].active = flags[7];
         inner.channels[2].active = flags[8];
@@ -88,7 +85,7 @@ impl Disturbance {
         inner.channels[10].active = flags[17];
         inner.channels[11].active = flags[19];
 
-        // Block 9 — avança segmentos cúbicos dos canais 0-8 (contínuos)
+        /* Block 9 — avança segmentos cúbicos dos canais 0-8 (contínuos) */
         for i in 0..9 {
             if time >= inner.channels[i].t_next {
                 let segment_duration = inner.channels[i].t_next - inner.channels[i].t_last;
@@ -100,7 +97,7 @@ impl Disturbance {
             }
         }
 
-        // Block 10 — avança segmentos cúbicos dos canais 9-11 (pulsos aleatórios)
+        /* Block 10 — avança segmentos cúbicos dos canais 9-11 (pulsos aleatórios) */
         for i in 9..12 {
             if time >= inner.channels[i].t_next {
                 let segment_duration = inner.channels[i].t_next - inner.channels[i].t_last;
@@ -125,7 +122,7 @@ impl Disturbance {
             }
         }
 
-        // Block 11 — inicializa todos os canais no instante zero
+        /* Block 11 — inicializa todos os canais no instante zero */
         if time == 0.0 {
             for i in 0..12 {
                 inner.channels[i].a = inner.channels[i].s_zero;
@@ -137,7 +134,7 @@ impl Disturbance {
             }
         }
 
-        // Block 12 (reduzido) — só os 4 canais que já têm consumidor
+        /* Block 12 (reduzido) — só os 4 canais que já têm consumidor */
         let reactor_cw_temp = eval_disturbance(4, time, inner) + flags[3] as f64 * self.step_magnitudes[3];
         let separator_cw_temp = eval_disturbance(5, time, inner) + flags[4] as f64 * self.step_magnitudes[4];
         let reaction_factor_1 = eval_disturbance(6, time, inner);

@@ -1,9 +1,8 @@
-// tep/separator.rs
+/* tep/separator.rs */
 
-/** [REVISADO] | Separator como DynamicModel real. Diferente do Reactor, precisa de um
-input de outro componente (reactor.temperature) — por isso `new()` declara
-esse `need` em subscribe() além dos `offers`, e guarda o Proxy resolvido
-(por StateRegistry::resolve(), chamado depois que todo mundo se inscreveu)
+/** Separator como DynamicModel real. Diferente do Reactor, precisa de um input de outro componente
+(reactor.temperature) — por isso `new()` declara esse `need` em subscribe() além dos `offers`, e
+guarda o Proxy resolvido (por StateRegistry::resolve(), chamado depois que todo mundo se inscreveu)
 como campo. evaluate() não recebe nada — só lê/escreve via Proxy.
 */
 use monjolo::dynamic_model::DynamicModel;
@@ -13,12 +12,12 @@ use monjolo::state_registry::{Proxy, StateRegistry};
 use crate::physics::constants::TepConstants;
 use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
 
-const SEPARATOR_VOLUME: f64 = 3500.0; // volume total do separador vapor/líquido [m³]
-const GAS_CONSTANT: f64 = 998.9; // R em [mmHg·m³/(kmol·K)]
+const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [m³] */
+const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
 
 pub struct Separator {
     constants: TepConstants,
-    own_state: Vec<Proxy>, // ucvs[0..3] vapor A/B/C, ucls[3..8] líquido D-H, ets[8] entalpia
+    own_state: Vec<Proxy>, /* ucvs[0..3] vapor A/B/C, ucls[3..8] líquido D-H, ets[8] entalpia */
     reactor_temperature: Proxy,
     temperature: Proxy,
     pressure: Proxy,
@@ -30,12 +29,12 @@ pub struct Separator {
 }
 
 impl Separator {
-
     pub fn new(registry: &mut StateRegistry, initial: &Snapshot) -> Self {
         let mut offer_keys: Vec<String> = Vec::new();
 
-        // Estado próprio (9 números): 3 componentes leves em vapor (A,B,C) +
-        // 5 componentes pesados em líquido (D-H) + entalpia total do vaso.
+        /* Estado próprio (9 números): 3 componentes leves em vapor (A,B,C) + 5 componentes pesados
+        em líquido (D-H) + entalpia total do vaso.
+        */
         offer_keys.push("separator.state.vapor_a".into());
         offer_keys.push("separator.state.vapor_b".into());
         offer_keys.push("separator.state.vapor_c".into());
@@ -52,7 +51,7 @@ impl Separator {
         offer_keys.push("separator.liquid_density".into());
         offer_keys.push("separator.total_vapor_kmol".into());
 
-        // Composição líquida, um valor por componente (A-H).
+        /* Composição líquida, um valor por componente (A-H). */
         offer_keys.push("separator.liquid_composition.a".into());
         offer_keys.push("separator.liquid_composition.b".into());
         offer_keys.push("separator.liquid_composition.c".into());
@@ -62,7 +61,7 @@ impl Separator {
         offer_keys.push("separator.liquid_composition.g".into());
         offer_keys.push("separator.liquid_composition.h".into());
 
-        // Composição de vapor, um valor por componente (A-H).
+        /* Composição de vapor, um valor por componente (A-H). */
         offer_keys.push("separator.vapor_composition.a".into());
         offer_keys.push("separator.vapor_composition.b".into());
         offer_keys.push("separator.vapor_composition.c".into());
@@ -75,8 +74,9 @@ impl Separator {
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
         let (offered, requested) = registry.subscribe(&offer_refs, &["reactor.temperature"]);
 
-        // Semeia o estado próprio com a condição inicial recebida — mesma
-        // ordem de offer_keys: vapor A,B,C, líquido D-H, entalpia.
+        /* Semeia o estado próprio com a condição inicial recebida — mesma ordem de offer_keys:
+        vapor A,B,C, líquido D-H, entalpia.
+        */
         offered[0].set(initial.get("state.separator_vapor.A").unwrap_or(0.0));
         offered[1].set(initial.get("state.separator_vapor.B").unwrap_or(0.0));
         offered[2].set(initial.get("state.separator_vapor.C").unwrap_or(0.0));
@@ -152,15 +152,13 @@ impl DynamicModel for Separator {
             self.vapor_composition[i].set(vapor_composition[i]);
         }
 
-        // [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp —
-        // quanto own_state muda por tempo) não é calculada aqui. Quem
-        // calcula é `Flows`, uma DynamicModel separada que roda depois
-        // deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao
-        // mesmo tempo, necessário pra saber o que entra/sai daqui) —
-        // `Flows::evaluate()` escreve direto nos slots de derivada deste
-        // componente. Este `evaluate()` só produz valores termodinâmicos
-        // derivados do estado atual (temperatura, pressão, composição
-        // etc.), nunca a derivada do estado em si.
+        /* [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp — quanto own_state muda por
+        tempo) não é calculada aqui. Quem calcula é `Flows`, uma DynamicModel separada que roda
+        depois deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao mesmo tempo,
+        necessário pra saber o que entra/sai daqui) — `Flows::evaluate()` escreve direto nos slots
+        de derivada deste componente. Este `evaluate()` só produz valores termodinâmicos derivados
+        do estado atual (temperatura, pressão, composição etc.), nunca a derivada do estado em si.
+        */
     }
 }
 

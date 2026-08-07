@@ -1,27 +1,23 @@
-// tep/subsystems/actuators.rs
-//
-// Valve/Agitator — movidos de dentro do `monjolo` pra cá (2026-07-30):
-// são componentes físicos específicos do TEP, não blocos genéricos do
-// framework. Moram em subsystems/ junto com Reactor/Separator/Stripper/
-// Compressor porque são exatamente a mesma coisa — componentes com estado
-// e derivada próprios, add_dynamic'd no composto (Art. 2.6). Arquivo no
-// plural (`actuators`, não `actuator`) porque guarda mais de um tipo, ao
-// contrário dos outros subsistemas (um tipo por arquivo).
-//
-// Cada um é as duas coisas ao mesmo tempo — `DynamicModel`
-// (participa de evaluate()/RK4, dinâmica de 1ª ordem real) *e*
-// `monjolo::actuator::Actuator` (`impl Actuator for Valve`/`Agitator`,
-// aceita comando de fora via `write()`) — não há conflito, são dois traits
-// distintos sobre o mesmo objeto.
-//
-// `command` é `Cell<f64>`, não um campo simples: `write(&self, ...)`
-// (contrato de `Actuator`) e `evaluate(&self)` (contrato de `DynamicModel`)
-// não recebem `&mut self`, mas precisam mutar `command` — mutabilidade
-// interior, mesmo raciocínio de `EvaluationState`/`Proxy`.
-//
-// Cada instância de `Valve` precisa de um `name` único (ex.: "feed_a",
-// "cooling_water") pra não colidir no StateRegistry. `Agitator` é único na
-// planta, sem parâmetro de nome.
+/* tep/subsystems/actuators.rs */
+
+/** Valve/Agitator — movidos de dentro do `monjolo` pra cá (2026-07-30): são componentes físicos
+específicos do TEP, não blocos genéricos do framework. Moram em subsystems/ junto com
+Reactor/Separator/Stripper/Compressor porque são exatamente a mesma coisa — componentes com estado e
+derivada próprios, add_dynamic'd no composto (Art. 2.6). Arquivo no plural (`actuators`, não
+`actuator`) porque guarda mais de um tipo, ao contrário dos outros subsistemas (um tipo por
+arquivo).
+
+Cada um é as duas coisas ao mesmo tempo — `DynamicModel` (participa de evaluate()/RK4, dinâmica de
+1ª ordem real) *e* `monjolo::actuator::Actuator` (`impl Actuator for Valve`/`Agitator`, aceita
+comando de fora via `write()`) — não há conflito, são dois traits distintos sobre o mesmo objeto.
+
+`command` é `Cell<f64>`, não um campo simples: `write(&self, ...)` (contrato de `Actuator`) e
+`evaluate(&self)` (contrato de `DynamicModel`) não recebem `&mut self`, mas precisam mutar `command`
+— mutabilidade interior, mesmo raciocínio de `EvaluationState`/`Proxy`.
+
+Cada instância de `Valve` precisa de um `name` único (ex.: "feed_a", "cooling_water") pra não
+colidir no StateRegistry. `Agitator` é único na planta, sem parâmetro de nome.
+*/
 
 use std::cell::Cell;
 
@@ -29,10 +25,11 @@ use monjolo::actuator::Actuator;
 use monjolo::dynamic_model::DynamicModel;
 use monjolo::state_registry::{Proxy, StateRegistry};
 
-// ── Valve ───────────────────────────────────────────────────────────
-// Models a control valve with first-order lag: d(position)/dt = (command - position) / tau
-// State: [position]  (one variable: current valve position, 0–100 %)
+/* ── Valve ── */
 
+/** Models a control valve with first-order lag: d(position)/dt = (command - position) / tau. State:
+[position] (one variable: current valve position, 0-100%).
+*/
 pub struct Valve {
     tau: f64,
     command: Cell<f64>,
@@ -72,11 +69,11 @@ impl DynamicModel for Valve {
     }
 }
 
-// ── Agitator ──────────────────────────────────────────────────────────────────
-// Reactor agitator speed — same first-order dynamics as a valve but
-// controls mixing intensity (agsp), not fluid flow.
-// State: [speed]  (one variable: current agitator speed, 0–100 %)
+/* ── Agitator ── */
 
+/** Reactor agitator speed — same first-order dynamics as a valve but controls mixing intensity
+(agsp), not fluid flow. State: [speed] (one variable: current agitator speed, 0-100%).
+*/
 pub struct Agitator {
     tau: f64,
     command: Cell<f64>,
@@ -126,7 +123,7 @@ mod tests {
         registry.borrow_mut().resolve().unwrap();
 
         valve.write(50.0);
-        // posição nasce em 0.0 (default do slot) — derivada esperada: (50-0)/2 = 25
+        /* posição nasce em 0.0 (default do slot) — derivada esperada: (50-0)/2 = 25 */
         valve.evaluate();
         assert_eq!(valve.derivative.get(), 25.0);
     }

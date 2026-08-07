@@ -1,7 +1,8 @@
-// tep/stripper.rs
-//
-// Mesmo padrão do Separator: precisa de separator.temperature via Proxy.
-// evaluate() não recebe nada — só lê/escreve via Proxy.
+/* tep/stripper.rs */
+
+/** Mesmo padrão do Separator: precisa de separator.temperature via Proxy. evaluate() não recebe
+nada — só lê/escreve via Proxy.
+*/
 
 use monjolo::dynamic_model::DynamicModel;
 use monjolo::snapshot::Snapshot;
@@ -12,7 +13,7 @@ use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
 
 pub struct Stripper {
     constants: TepConstants,
-    own_state: Vec<Proxy>, // uclc[0..8] líquido A-H, etc[8] entalpia
+    own_state: Vec<Proxy>, /* uclc[0..8] líquido A-H, etc[8] entalpia */
     separator_temperature: Proxy,
     temperature: Proxy,
     liquid_volume: Proxy,
@@ -32,9 +33,10 @@ impl Stripper {
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
         let (offered, requested) = registry.subscribe(&offer_refs, &["separator.temperature"]);
 
-        // Semeia o estado próprio com a condição inicial recebida — mesma
-        // ordem de offer_keys: líquido A-H, entalpia. Chave ausente no
-        // Snapshot vira 0.0 (mesmo default que o slot já teria).
+        /* Semeia o estado próprio com a condição inicial recebida — mesma ordem de offer_keys:
+        líquido A-H, entalpia. Chave ausente no Snapshot vira 0.0 (mesmo default que o slot já
+        teria).
+        */
         offered[0].set(initial.get("state.stripper_liquid.A").unwrap_or(0.0));
         offered[1].set(initial.get("state.stripper_liquid.B").unwrap_or(0.0));
         offered[2].set(initial.get("state.stripper_liquid.C").unwrap_or(0.0));
@@ -85,15 +87,13 @@ impl DynamicModel for Stripper {
             self.liquid_composition[i].set(liquid_composition[i]);
         }
 
-        // Decisão de modelagem: a derivada real do próprio estado (yp —
-        // quanto own_state muda por tempo) não é calculada aqui. Quem
-        // calcula é `Flows`, uma DynamicModel separada que roda depois
-        // deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao
-        // mesmo tempo, necessário pra saber o que entra/sai daqui) —
-        // `Flows::evaluate()` escreve direto nos slots de derivada deste
-        // componente. Este `evaluate()` só produz valores termodinâmicos
-        // derivados do estado atual (temperatura, pressão, composição
-        // etc.), nunca a derivada do estado em si.
+        /* Decisão de modelagem: a derivada real do próprio estado (yp — quanto own_state muda por
+        tempo) não é calculada aqui. Quem calcula é `Flows`, uma DynamicModel separada que roda
+        depois deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao mesmo tempo,
+        necessário pra saber o que entra/sai daqui) — `Flows::evaluate()` escreve direto nos slots
+        de derivada deste componente. Este `evaluate()` só produz valores termodinâmicos derivados
+        do estado atual (temperatura, pressão, composição etc.), nunca a derivada do estado em si.
+        */
     }
 }
 

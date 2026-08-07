@@ -1,26 +1,23 @@
-// tep/reactor.rs
+/* tep/reactor.rs */
 
-/** [REVISADO] | Reactor como DynamicModel real. É o único dos 7 subsistemas químicos
-(Reactor/Separator/Stripper/Compressor/Flows/Heat/Measurements) que não
-depende de dado de outro componente pra calcular sua termodinâmica.
+/** Reactor como DynamicModel real. É o único dos 7 subsistemas químicos
+(Reactor/Separator/Stripper/Compressor/Flows/Heat/Measurements) que não depende de dado de outro
+componente pra calcular sua termodinâmica.
 
-Se inscreve no StateRegistry uma única vez, em new() — cada slot que
-oferece (inclusive o próprio estado, "reactor.state.{i}") vira um Proxy
-guardado como campo. evaluate() não recebe nada: só lê/escreve nesses
-Proxys, nunca por nome (ver plan_refactor.md, seções 5.3, 7).
+Se inscreve no StateRegistry uma única vez, em new() — cada slot que oferece (inclusive o próprio
+estado, "reactor.state.{i}") vira um Proxy guardado como campo. evaluate() não recebe nada: só
+lê/escreve nesses Proxys, nunca por nome (ver plan_refactor.md, seções 5.3, 7).
 
-reaction_factor_1/2 agora são `needs` de verdade (Disturbance, IDV 13) —
-não são mais valores nominais fixos.
+reaction_factor_1/2 agora são `needs` de verdade (Disturbance, IDV 13) — não são mais valores
+nominais fixos.
 
-Simplificação temporária que continua: seed do Newton-Raphson de
-temperatura fixo em 120.0 — o valor exato não muda a raiz encontrada, só a
-convergência; o código original só usava esse valor em t=0, mas `time` não
-está disponível aqui (evaluate() não recebe parâmetro nenhum).
+Simplificação temporária que continua: seed do Newton-Raphson de temperatura fixo em 120.0 — o valor
+exato não muda a raiz encontrada, só a convergência; o código original só usava esse valor em t=0,
+mas `time` não está disponível aqui (evaluate() não recebe parâmetro nenhum).
 
-As derivadas reais de estado (yp) dependem de FlowsOut (que precisa dos
-quatro subsistemas termodinâmicos ao mesmo tempo) — por isso ainda não são
-oferecidas como slot; só os valores termodinâmicos (e o estado próprio,
-lido de volta) são reais.
+As derivadas reais de estado (yp) dependem de FlowsOut (que precisa dos quatro subsistemas
+termodinâmicos ao mesmo tempo) — por isso ainda não são oferecidas como slot; só os valores
+termodinâmicos (e o estado próprio, lido de volta) são reais.
 */
 
 use monjolo::dynamic_model::DynamicModel;
@@ -30,18 +27,19 @@ use monjolo::state_registry::{Proxy, StateRegistry};
 use crate::physics::constants::TepConstants;
 use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
 
-const REACTOR_VOLUME: f64 = 1300.0; // volume total do vaso do reator [m³]
-const GAS_CONSTANT: f64 = 998.9; // R em [mmHg·m³/(kmol·K)]
-const REACTION_ENTHALPIES: [f64; 2] = [0.06899381054, 0.05]; // calor das reações 1 e 2 [kJ/kmol]
+const REACTOR_VOLUME: f64 = 1300.0; /* volume total do vaso do reator [m³] */
+const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
+const REACTION_ENTHALPIES: [f64; 2] = [0.06899381054, 0.05]; /* calor das reações 1 e 2 [kJ/kmol] */
 
-const REACTION_FACTOR_1_NOMINAL: f64 = 1.0; // TODO: devia ser um `need` do Disturbance (IDV 13)
-const REACTION_FACTOR_2_NOMINAL: f64 = 1.0; // TODO: devia ser um `need` do Disturbance (IDV 13)
-const TEMPERATURE_SEED: f64 = 120.0; // seed do Newton-Raphson — não afeta a raiz
+const REACTION_FACTOR_1_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
+const REACTION_FACTOR_2_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
+const TEMPERATURE_SEED: f64 = 120.0; /* seed do Newton-Raphson — não afeta a raiz */
 
 pub struct Reactor {
     constants: TepConstants,
-    // Estado próprio (9 números: ucvr[0..3] vapor A/B/C, uclr[3..8] líquido
-    // D-H, etr[8] entalpia total) — o que antes vinha de `state: &[f64]`.
+    /* Estado próprio (9 números: ucvr[0..3] vapor A/B/C, uclr[3..8] líquido D-H, etr[8] entalpia
+    total) — o que antes vinha de `state: &[f64]`.
+    */
     own_state: Vec<Proxy>,
     temperature: Proxy,
     temperature_k: Proxy,
@@ -58,14 +56,13 @@ pub struct Reactor {
 }
 
 impl Reactor {
-
     pub fn new(registry: &mut StateRegistry, initial: &Snapshot) -> Self {
-
-        // cria a lista vazia que vai acumular todas as chaves a oferecer
+        /* cria a lista vazia que vai acumular todas as chaves a oferecer */
         let mut offer_keys: Vec<String> = Vec::new();
 
-        // Estado próprio (9 números): 3 componentes leves em vapor (A,B,C) +
-        // 5 componentes pesados em líquido (D-H) + entalpia total do vaso.
+        /* Estado próprio (9 números): 3 componentes leves em vapor (A,B,C) + 5 componentes pesados
+        em líquido (D-H) + entalpia total do vaso.
+        */
         offer_keys.push("reactor.state.vapor_a".into());
         offer_keys.push("reactor.state.vapor_b".into());
         offer_keys.push("reactor.state.vapor_c".into());
@@ -85,7 +82,7 @@ impl Reactor {
         offer_keys.push("reactor.total_vapor_kmol".into());
         offer_keys.push("reactor.heat_of_reaction".into());
 
-        // Composição líquida, um valor por componente (A-H).
+        /* Composição líquida, um valor por componente (A-H). */
         offer_keys.push("reactor.liquid_composition.a".into());
         offer_keys.push("reactor.liquid_composition.b".into());
         offer_keys.push("reactor.liquid_composition.c".into());
@@ -95,7 +92,7 @@ impl Reactor {
         offer_keys.push("reactor.liquid_composition.g".into());
         offer_keys.push("reactor.liquid_composition.h".into());
 
-        // Composição de vapor, um valor por componente (A-H).
+        /* Composição de vapor, um valor por componente (A-H). */
         offer_keys.push("reactor.vapor_composition.a".into());
         offer_keys.push("reactor.vapor_composition.b".into());
         offer_keys.push("reactor.vapor_composition.c".into());
@@ -105,7 +102,7 @@ impl Reactor {
         offer_keys.push("reactor.vapor_composition.g".into());
         offer_keys.push("reactor.vapor_composition.h".into());
 
-        // Kmol em fase vapor, um valor por componente (A-H).
+        /* Kmol em fase vapor, um valor por componente (A-H). */
         offer_keys.push("reactor.vapor_kmol.a".into());
         offer_keys.push("reactor.vapor_kmol.b".into());
         offer_keys.push("reactor.vapor_kmol.c".into());
@@ -115,8 +112,9 @@ impl Reactor {
         offer_keys.push("reactor.vapor_kmol.g".into());
         offer_keys.push("reactor.vapor_kmol.h".into());
 
-        // Taxa líquida de consumo/produção por componente (A-H) —
-        // estequiometria das 4 reações, já somada por componente.
+        /* Taxa líquida de consumo/produção por componente (A-H) — estequiometria das 4 reações, já
+        somada por componente.
+        */
         offer_keys.push("reactor.reaction_rates.a".into());
         offer_keys.push("reactor.reaction_rates.b".into());
         offer_keys.push("reactor.reaction_rates.c".into());
@@ -126,17 +124,18 @@ impl Reactor {
         offer_keys.push("reactor.reaction_rates.g".into());
         offer_keys.push("reactor.reaction_rates.h".into());
 
-        // converte Vec<String> pra Vec<&str>, formato que subscribe() espera
+        /* converte Vec<String> pra Vec<&str>, formato que subscribe() espera */
         let offer_refs: Vec<&str> = offer_keys.iter().map(String::as_str).collect();
 
-        // registra todas as chaves de uma vez; devolve os Proxys resolvidos
-        // na mesma ordem (segundo retorno, needs, vazio — Reactor não
-        // depende de mais nada)
+        /* registra todas as chaves de uma vez; devolve os Proxys resolvidos na mesma ordem (segundo
+        retorno, needs, vazio — Reactor não depende de mais nada)
+        */
         let (offered, _) = registry.subscribe(&offer_refs, &[]);
 
-        // Semeia o estado próprio com a condição inicial recebida — mesma
-        // ordem de offer_keys: vapor A,B,C, líquido D-H, entalpia. Chave
-        // ausente no Snapshot vira 0.0 (mesmo default que o slot já teria).
+        /* Semeia o estado próprio com a condição inicial recebida — mesma ordem de offer_keys:
+        vapor A,B,C, líquido D-H, entalpia. Chave ausente no Snapshot vira 0.0 (mesmo default que o
+        slot já teria).
+        */
         offered[0].set(initial.get("state.reactor_vapor.A").unwrap_or(0.0));
         offered[1].set(initial.get("state.reactor_vapor.B").unwrap_or(0.0));
         offered[2].set(initial.get("state.reactor_vapor.C").unwrap_or(0.0));
@@ -172,8 +171,8 @@ impl DynamicModel for Reactor {
     }
 
     fn evaluate(&self) {
-        let mut vapor_moles = [0.0f64; 8]; // kmol A,B,C na fase vapor (estado)
-        let mut liquid_moles = [0.0f64; 8]; // kmol D,E,F,G,H na fase líquida (estado)
+        let mut vapor_moles = [0.0f64; 8]; /* kmol A,B,C na fase vapor (estado) */
+        let mut liquid_moles = [0.0f64; 8]; /* kmol D,E,F,G,H na fase líquida (estado) */
         for i in 0..3 { vapor_moles[i] = self.own_state[i].get(); }
         for i in 3..8 { liquid_moles[i] = self.own_state[i].get(); }
         let total_enthalpy = self.own_state[8].get();
@@ -205,7 +204,7 @@ impl DynamicModel for Reactor {
         let total_vapor_moles = pressure * volume_vapor / GAS_CONSTANT / temperature_k;
         for i in 3..8 { vapor_moles[i] = total_vapor_moles * vapor_composition[i]; }
 
-        // Cinética de Arrhenius — taxas brutas das 4 reações
+        /* Cinética de Arrhenius — taxas brutas das 4 reações */
         let mut rates = [0.0f64; 4];
         rates[0] = (31.5859536 - 40000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_1_NOMINAL;
         rates[1] = (3.00094014 - 20000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_2_NOMINAL;
@@ -224,7 +223,7 @@ impl DynamicModel for Reactor {
         rates[3] *= partial_pressures[0] * partial_pressures[3];
         for r in rates.iter_mut() { *r *= volume_vapor; }
 
-        // Estequiometria: consumo/produção por componente
+        /* Estequiometria: consumo/produção por componente */
         let mut reaction_rates = [0.0f64; 8];
         reaction_rates[0] = -rates[0] - rates[1] - rates[2];
         reaction_rates[2] = -rates[0] - rates[1];
@@ -250,15 +249,13 @@ impl DynamicModel for Reactor {
             self.reaction_rates[i].set(reaction_rates[i]);
         }
 
-        // [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp —
-        // quanto own_state muda por tempo) não é calculada aqui. Quem
-        // calcula é `Flows`, uma DynamicModel separada que roda depois
-        // deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao
-        // mesmo tempo, necessário pra saber o que entra/sai daqui) —
-        // `Flows::evaluate()` escreve direto nos slots de derivada deste
-        // componente. Este `evaluate()` só produz valores termodinâmicos
-        // derivados do estado atual (temperatura, pressão, composição
-        // etc.), nunca a derivada do estado em si.
+        /* [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp — quanto own_state muda por
+        tempo) não é calculada aqui. Quem calcula é `Flows`, uma DynamicModel separada que roda
+        depois deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao mesmo tempo,
+        necessário pra saber o que entra/sai daqui) — `Flows::evaluate()` escreve direto nos slots
+        de derivada deste componente. Este `evaluate()` só produz valores termodinâmicos derivados
+        do estado atual (temperatura, pressão, composição etc.), nunca a derivada do estado em si.
+        */
     }
 }
 
