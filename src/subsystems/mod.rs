@@ -5,10 +5,10 @@
 antes de virar DynamicModel real cada um). model.rs (o composto, TennesseeEastmanModel) fica fora
 dessa pasta de propósito: não é um subsistema, é quem os orquestra.
 
-`actuators` (plural — 12 tipos concretos no mesmo arquivo, um por atuador físico: 11 válvulas +
-`Agitator`) mora aqui também: são componentes físicos reais da planta, com estado e derivada
-próprios, igual aos 7 acima — a diferença é só que também implementam
-`monjolo::actuator::Actuator` (aceitam comando de fora).
+`actuators` mora aqui também, mas não é mais um subsistema com tipo próprio — os 12 atuadores
+físicos (11 válvulas + agitador) não têm `struct` nenhuma (ver `monjolo::actuator::model::Actuator`);
+o arquivo só agrupa 12 funções, uma por atuador, cada uma construindo uma instância (chave +
+lei física via closure) pra `model.rs::build_tep()` chamar.
 */
 pub mod actuators;
 pub mod compressor;
