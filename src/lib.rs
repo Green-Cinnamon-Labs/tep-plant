@@ -4,7 +4,8 @@ Só o que é específico do TEP mora aqui. Framework de simulação genérico (D
 StateRegistry, Integrator, atuador/sensor de 1ª ordem, distúrbio cúbico, e agora também o carregador
 genérico de condição inicial — `monjolo::snapshot::Snapshot`) mora em monjolo (crate irmão).
 
-Organização de pastas: subsystems/ (os 7 blocos químicos + actuators.rs, Valve/Agitator),
+Organização de pastas: subsystems/ (os 7 blocos químicos + actuators.rs, 12 tipos concretos de
+atuador — 11 válvulas + `Agitator`),
 disturbance/ (Disturbance + seu estado interno), physics/ (constantes e correlações termodinâmicas
 compartilhadas). model.rs (o composto, TennesseeEastmanModel) fica solto na raiz porque é ponto de
 composição/entrada, não subsistema.
