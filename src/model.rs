@@ -44,6 +44,7 @@ use crate::subsystems::separator::Separator;
 use crate::subsystems::stripper::Stripper;
 
 pub fn build_tep(registry: &mut StateRegistry, initial: &Snapshot) -> Composite {
+    
     let mut composite = Composite::new().named("TennesseeEastmanModel");
 
     // Subsistemas com termodinâmica

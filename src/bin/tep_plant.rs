@@ -22,6 +22,7 @@ use tennessee_eastman_process::model;
 const INITIAL_STATE_PATH: &str = "src/snapshots/te_exp3_snapshot.toml";
 
 fn main() {
+    
     let initial = Snapshot::from_file(INITIAL_STATE_PATH)
         .unwrap_or_else(|e| panic!("falha ao carregar condição inicial de '{INITIAL_STATE_PATH}': {e}"));
 
