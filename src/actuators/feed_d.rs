@@ -8,7 +8,7 @@ que declarada como struct+atributos em vez de `Actuator::new()` + closure. `comm
 viram getters (`self.command()`/`self.position()`); `dynamics()` é código comum do usuário, nunca
 tocado pela macro — só a struct é reescrita.
 */
-#[monjolo::actuator(key = "valve.feed_d.position")]
+#[monjolo::actuator(key = "valve.feed_d.position", config = "state.valves.d_feed")]
 pub struct FeedD {
     #[command]
     command: f64,
@@ -30,6 +30,7 @@ mod tests {
     use super::*;
     use monjolo::actuator::Actuator as ActuatorTrait;
     use monjolo::dynamic_model::DynamicModel;
+    use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::StateRegistry;
 
     /* Mesma prova de derivative_is_real_not_a_stub (monjolo/monjolo/actuator/model.rs), agora
@@ -41,19 +42,42 @@ mod tests {
     #[test]
     fn feed_d_derivative_matches_the_hand_written_law() {
         let registry = StateRegistry::shared();
-        let feed_d = FeedD::new(&mut registry.borrow_mut());
+        let config = Snapshot::from_pairs(&[]); // sem "state.valves.d_feed" — nasce em 0.0, como antes
+        let feed_d = FeedD::new(&mut registry.borrow_mut(), &config);
         registry.borrow_mut().resolve().unwrap();
 
         feed_d.write(72.0);
-        /* posição nasce em 0.0 (default do slot) — derivada esperada: (72-0)/(8/3600) = 32400 */
+        /* posição nasce em 0.0 (config vazio) — derivada esperada: (72-0)/(8/3600) = 32400 */
         feed_d.evaluate();
         assert_eq!(feed_d.__derivative.get(), (72.0 - 0.0) / (8.0 / 3600.0));
+    }
+
+    /** A capacidade nova: `config = "state.valves.d_feed"` semeia `command` E `position` com o
+    MESMO valor nominal — `dynamics()` (command - position)/tau nasce em zero, nada deriva sozinho
+    até algo escrever um `command` diferente (ver doc de `#[actuator(...)]`, monjolo-macros/lib.rs).
+    Antes desta capacidade, todo atuador nascia em 0.0 incondicionalmente, mesmo com
+    `application.toml` já tendo o valor certo em `[state.valves]` — a causa raiz de "a planta não
+    estabiliza porque as válvulas manuais nascem fechadas".
+    */
+    #[test]
+    fn feed_d_seeds_command_and_position_from_config() {
+        let registry = StateRegistry::shared();
+        let config = Snapshot::from_pairs(&[("state.valves.d_feed", 63.05263038999999)]);
+        let feed_d = FeedD::new(&mut registry.borrow_mut(), &config);
+        registry.borrow_mut().resolve().unwrap();
+
+        assert_eq!(feed_d.command(), 63.05263038999999);
+        assert_eq!(feed_d.position(), 63.05263038999999);
+
+        feed_d.evaluate();
+        assert_eq!(feed_d.__derivative.get(), 0.0, "command == position no nascimento — nada deriva sozinho");
     }
 
     #[test]
     fn feed_d_registers_itself_under_its_own_key() {
         let registry = StateRegistry::shared();
-        let feed_d = FeedD::new(&mut registry.borrow_mut());
+        let config = Snapshot::from_pairs(&[]);
+        let feed_d = FeedD::new(&mut registry.borrow_mut(), &config);
         let feed_d: Rc<dyn ActuatorTrait> = feed_d;
 
         let found = registry
@@ -66,7 +90,8 @@ mod tests {
     #[test]
     fn feed_d_is_a_dynamic_model_too() {
         let registry = StateRegistry::shared();
-        let feed_d = FeedD::new(&mut registry.borrow_mut());
+        let config = Snapshot::from_pairs(&[]);
+        let feed_d = FeedD::new(&mut registry.borrow_mut(), &config);
         registry.borrow_mut().resolve().unwrap();
 
         let feed_d: Rc<dyn DynamicModel> = feed_d;

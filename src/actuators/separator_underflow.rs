@@ -1,7 +1,7 @@
 /* tep/actuators/separator_underflow.rs */
 
 /* XMV-7: Separator Pot Liquid Flow (underflow do separador). VTAU(7) = 5s. */
-#[monjolo::actuator(key = "valve.separator_underflow.position")]
+#[monjolo::actuator(key = "valve.separator_underflow.position", config = "state.valves.separator_underflow")]
 pub struct SeparatorUnderflow {
     #[command]
     command: f64,

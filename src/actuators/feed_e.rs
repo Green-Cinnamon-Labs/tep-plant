@@ -1,7 +1,7 @@
 /* tep/actuators/feed_e.rs */
 
 /* XMV-2: E Feed Flow. VTAU(2) = 8s. */
-#[monjolo::actuator(key = "valve.feed_e.position")]
+#[monjolo::actuator(key = "valve.feed_e.position", config = "state.valves.e_feed")]
 pub struct FeedE {
     #[command]
     command: f64,

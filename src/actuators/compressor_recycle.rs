@@ -1,7 +1,7 @@
 /* tep/actuators/compressor_recycle.rs */
 
 /* XMV-5: Compressor Recycle Valve. VTAU(5) = 7s. */
-#[monjolo::actuator(key = "valve.compressor_recycle.position")]
+#[monjolo::actuator(key = "valve.compressor_recycle.position", config = "state.valves.compressor_recycle_valve")]
 pub struct CompressorRecycle {
     #[command]
     command: f64,
