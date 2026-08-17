@@ -230,8 +230,15 @@ impl Flows {
             component_flow_10[i] = composition[10][i] * flow[10];
         }
 
-        /* Block 26: fração de split vapor/líquido do stripper (dependente de temperatura). */
-        let mut split_fraction = [0.0f64; 8];
+        /* Block 26: fração de split vapor/líquido do stripper — dependente de temperatura só pros
+        componentes D-H (índices 3-7, calculados abaixo). A/B/C (índices 0-2) usam os valores FIXOS
+        de TEINIT no teprob.f original (SFR(1)=0.995, SFR(2)=0.991, SFR(3)=0.990) — nunca
+        recalculados depois da inicialização, constantes a simulação inteira. Sem isso, A/B/C
+        ficavam com fração de vapor 0.0 (default do array) em vez de ~99% — o A&C feed (100% A+B+C)
+        caía inteiro no lado líquido do flash, inundando o stripper (achado comparando contra
+        teprob.f/docs/fortran-original após o nível do stripper disparar em produção).
+        */
+        let mut split_fraction = [0.995, 0.991, 0.990, 0.0, 0.0, 0.0, 0.0, 0.0];
         if flow[10] > 0.1 {
             let temperature_factor = if stripper_temperature > 170.0 {
                 stripper_temperature - 120.262

@@ -136,25 +136,21 @@ impl Derivatives {
         /* slot 8 COM a correção — a única forma "corrigida" que existe, publicada por Flows. */
         let compressor_discharge_enthalpy = self.compressor_discharge_enthalpy();
 
-        /* Composição do flash (slots 4/11) só existe normalizando FCM — ninguém publica a fração
-        em si, só a vazão por componente (que é o que as equações de massa já usam direto).
+        /* Composição do vapor do flash (slot 4) só existe normalizando FCM — ninguém publica a
+        fração em si, só a vazão por componente (que é o que as equações de massa já usam direto).
+        Não existe equivalente pro líquido do flash (slot 11): `HST(11)`/`XST(·,11)` são computados
+        no original (Block 29-30) mas NUNCA usados em Block 40 — quem entra na energia do stripper
+        é `HST(10)` (entalpia do underflow do separador, `enthalpy_separator_liquid`, já calculada
+        acima), não uma entalpia própria do líquido do flash.
         */
         let flash_vapor_total: f64 = flash_vapor_flow.iter().sum();
-        let flash_liquid_total: f64 = flash_liquid_flow.iter().sum();
         let mut flash_vapor_composition = [0.0f64; 8];
-        let mut flash_liquid_composition = [0.0f64; 8];
         if flash_vapor_total > 0.0 {
             for i in 0..8 {
                 flash_vapor_composition[i] = flash_vapor_flow[i] / flash_vapor_total;
             }
         }
-        if flash_liquid_total > 0.0 {
-            for i in 0..8 {
-                flash_liquid_composition[i] = flash_liquid_flow[i] / flash_liquid_total;
-            }
-        }
         let enthalpy_flash_vapor = mixture_enthalpy(&flash_vapor_composition, stripper_temperature, 1, &constants);
-        let enthalpy_flash_liquid = mixture_enthalpy(&flash_liquid_composition, stripper_temperature, 0, &constants);
 
         /* ===== Reator — YP(1..8), YP(9): FCM(·,7) - FCM(·,8) + CRXR(·) ===== */
         let reaction_rates = self.reactor_reaction_rates();
@@ -198,7 +194,7 @@ impl Derivatives {
         for i in 0..8 {
             stripper_liquid_derivative[i] = flash_liquid_flow[i] - stripper_liquid[i] * flow[12];
         }
-        let stripper_enthalpy_derivative = enthalpy_feed_ac * flow[3] + enthalpy_flash_liquid * flow[11]
+        let stripper_enthalpy_derivative = enthalpy_feed_ac * flow[3] + enthalpy_separator_liquid * flow[10]
             - enthalpy_flash_vapor * flow[4]
             - enthalpy_stripper_liquid * flow[12]
             + self.condenser_heat();
@@ -472,7 +468,7 @@ mod tests {
     fn stripper_energy_derivative_isolates_heat_term_when_flows_are_zero() {
         let registry = StateRegistry::shared();
         let seeded = seed_registry(&mut registry.borrow_mut());
-        // flow[3]/flow[4]/flow[11]/flow[12] ficam em 0.0 — zera os quatro termos de entalpia*vazão
+        // flow[3]/flow[4]/flow[10]/flow[12] ficam em 0.0 — zera os quatro termos de entalpia*vazão
         seeded.condenser_heat.set(7.0);
 
         let config = Snapshot::from_pairs(&[]);
