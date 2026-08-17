@@ -2,14 +2,15 @@
 # 'tempo real', 'usuários' — só de 'planta', 'estado', 'entradas', 'saídas',
 # 'parâmetros', 'edos', 'integração'.
 #
-# O binário `tep-plant` (`src/bin/tep_plant.rs`) monta a Simulation.
+# O binário `tep-plant` (`src/main.rs` — layout padrão de crate com 1 lib + 1 bin; `[[bin]]` abaixo
+# só existe porque o nome do binário, "tep-plant", difere do nome do pacote/lib) monta a Simulation.
 #
-# NOTA (2026-07-30): feature `opcua` do monjolo desligada por enquanto — a
-# camada de descoberta/exposição externa (adaptador de rede) está sendo
-# redesenhada. `Valve`/`Agitator` (física específica do TEP, `impl Actuator`
-# direto) moram aqui (src/actuator.rs). `Sensor` (com `SensorBehavior`/
-# `Noisy`/`Hysteresis` — genérico, sem nada de TEP) mora em `monjolo`
-# (`monjolo::sensor::model`), reaproveitável por qualquer planta.
+# NOTA (2026-08-15): feature `opcua` ligada de novo (default OFF, `--features opcua` liga) — o
+# adaptador de rede (monjolo::adapter::opcua) expõe os catálogos de Sensor/Actuator já existentes em
+# StateRegistry. Atuadores concretos do TEP (`FeedD` etc., `#[actuator(...)]`) moram em
+# src/actuators/, um arquivo por atuador — não mais `src/actuator.rs`/structs à mão. `Sensor` (com
+# `SensorBehavior`/`Noisy` — genérico, sem nada de TEP) mora em `monjolo` (`monjolo::sensor::model`),
+# reaproveitável por qualquer planta.
 #
 # TEMPORÁRIO: monjolo aponta pra path local, não pro `git` de origem.
 #
@@ -28,7 +29,12 @@ path = "src/lib.rs"
 
 [[bin]]
 name = "tep-plant"
-path = "src/bin/tep_plant.rs"
+path = "src/main.rs"
 
 [dependencies]
 monjolo = { path = "../monjolo" }
+
+[features]
+# Espelha a feature `opcua` de monjolo — mesma filosofia (async-opcua + tokio pesados demais pra
+# serem dependência default). `cargo run --bin tep-plant --features opcua` liga o adaptador.
+opcua = ["monjolo/opcua"]

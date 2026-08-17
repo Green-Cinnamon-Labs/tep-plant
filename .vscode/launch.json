@@ -2,6 +2,16 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "tep-plant (com adaptador OPC-UA)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--bin=tep-plant", "--features=opcua"]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Planta: 1x (tempo real, 3.6 s/step)",
       "type": "lldb",
       "request": "launch",
