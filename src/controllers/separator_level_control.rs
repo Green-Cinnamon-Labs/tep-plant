@@ -10,7 +10,7 @@ controle: nada mais no sistema regula o inventário do vaso.
 */
 #[monjolo::controller(name = "separator_level_control")]
 pub struct SeparatorLevelControl {
-    #[sensor(key = "xmeas.separator_level")]
+    #[sensor(key = "xmeas.separator.level")]
     level: f64,
     #[actuator(key = "valve.separator_underflow.position")]
     underflow: f64,
@@ -38,9 +38,9 @@ mod tests {
     use std::rc::Rc;
 
     fn seed_registry(registry: &mut StateRegistry, level: f64) -> Rc<ConcreteActuator> {
-        let (offered, _) = registry.subscribe(&["xmeas.separator_level"], &[]);
+        let (offered, _) = registry.subscribe(&["xmeas.separator.level"], &[]);
         offered[0].set(level);
-        ConcreteSensor::new(registry, "xmeas.separator_level", Box::new(Ideal));
+        ConcreteSensor::new(registry, "xmeas.separator.level", Box::new(Ideal));
         ConcreteActuator::new(registry, "valve.separator_underflow.position", |command, _state| command)
     }
 

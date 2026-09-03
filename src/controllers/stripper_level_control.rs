@@ -10,7 +10,7 @@ controle, pelo mesmo motivo de separator_level_control.rs.
 */
 #[monjolo::controller(name = "stripper_level_control")]
 pub struct StripperLevelControl {
-    #[sensor(key = "xmeas.stripper_level")]
+    #[sensor(key = "xmeas.stripper.level")]
     level: f64,
     #[actuator(key = "valve.stripper_product.position")]
     product: f64,
@@ -38,9 +38,9 @@ mod tests {
     use std::rc::Rc;
 
     fn seed_registry(registry: &mut StateRegistry, level: f64) -> Rc<ConcreteActuator> {
-        let (offered, _) = registry.subscribe(&["xmeas.stripper_level"], &[]);
+        let (offered, _) = registry.subscribe(&["xmeas.stripper.level"], &[]);
         offered[0].set(level);
-        ConcreteSensor::new(registry, "xmeas.stripper_level", Box::new(Ideal));
+        ConcreteSensor::new(registry, "xmeas.stripper.level", Box::new(Ideal));
         ConcreteActuator::new(registry, "valve.stripper_product.position", |command, _state| command)
     }
 

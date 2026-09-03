@@ -66,53 +66,61 @@ pub struct Measured {
     #[need(key = "heat.separator_cooling_water_return")]
     separator_cooling_water_return: f64,
 
-    #[offer(key = "xmeas.a_feed")]
+    /* Nomes seguem `xmeas.<local>.<grandeza>` — `<local>` é a STREAM FÍSICA do TEP (confirmada
+    contra o cabeçalho de `docs/fortran-original/teprob.f:122-143`, não o índice da XMEAS) pras
+    medições de vazão sem unidade própria, ou o nome do vaso pras medições locais. XMEAS(5) mede a
+    stream 8 (não a 5) — confirmado no próprio comentário do FORTRAN, não é erro de digitação.
+    */
+    #[offer(key = "xmeas.stream1.flow_rate")]
     xmeas_a_feed: f64,
-    #[offer(key = "xmeas.d_feed")]
+    #[offer(key = "xmeas.stream2.flow_rate")]
     xmeas_d_feed: f64,
-    #[offer(key = "xmeas.e_feed")]
+    #[offer(key = "xmeas.stream3.flow_rate")]
     xmeas_e_feed: f64,
-    #[offer(key = "xmeas.ac_feed")]
+    #[offer(key = "xmeas.stream4.flow_rate")]
     xmeas_ac_feed: f64,
-    #[offer(key = "xmeas.recycle_flow")]
+    #[offer(key = "xmeas.stream8.flow_rate")]
     xmeas_recycle_flow: f64,
-    #[offer(key = "xmeas.reactor_feed_rate")]
+    #[offer(key = "xmeas.stream6.flow_rate")]
     xmeas_reactor_feed_rate: f64,
-    #[offer(key = "xmeas.reactor_pressure")]
+    #[offer(key = "xmeas.reactor.pressure")]
     xmeas_reactor_pressure: f64,
-    #[offer(key = "xmeas.reactor_level")]
+    #[offer(key = "xmeas.reactor.level")]
     xmeas_reactor_level: f64,
-    #[offer(key = "xmeas.reactor_temperature")]
+    #[offer(key = "xmeas.reactor.temperature")]
     xmeas_reactor_temperature: f64,
-    #[offer(key = "xmeas.purge_rate")]
+    #[offer(key = "xmeas.stream9.flow_rate")]
     xmeas_purge_rate: f64,
-    #[offer(key = "xmeas.separator_temperature")]
+    #[offer(key = "xmeas.separator.temperature")]
     xmeas_separator_temperature: f64,
-    #[offer(key = "xmeas.separator_level")]
+    #[offer(key = "xmeas.separator.level")]
     xmeas_separator_level: f64,
-    #[offer(key = "xmeas.separator_pressure")]
+    #[offer(key = "xmeas.separator.pressure")]
     xmeas_separator_pressure: f64,
-    #[offer(key = "xmeas.separator_underflow")]
+    #[offer(key = "xmeas.stream10.flow_rate")]
     xmeas_separator_underflow: f64,
-    #[offer(key = "xmeas.stripper_level")]
+    #[offer(key = "xmeas.stripper.level")]
     xmeas_stripper_level: f64,
-    #[offer(key = "xmeas.stripper_pressure")]
+    #[offer(key = "xmeas.stripper.pressure")]
     xmeas_stripper_pressure: f64,
-    #[offer(key = "xmeas.stripper_underflow")]
+    #[offer(key = "xmeas.stream11.flow_rate")]
     xmeas_stripper_underflow: f64,
-    #[offer(key = "xmeas.stripper_temperature")]
+    #[offer(key = "xmeas.stripper.temperature")]
     xmeas_stripper_temperature: f64,
-    #[offer(key = "xmeas.stripper_steam_flow")]
+    #[offer(key = "xmeas.stripper.steam_flow_rate")]
     xmeas_stripper_steam_flow: f64,
-    #[offer(key = "xmeas.compressor_work")]
+    #[offer(key = "xmeas.compressor.work")]
     xmeas_compressor_work: f64,
-    #[offer(key = "xmeas.reactor_cooling_water_outlet_temp")]
+    #[offer(key = "xmeas.reactor.cooling_water_outlet_temperature")]
     xmeas_reactor_cooling_water_outlet_temp: f64,
-    #[offer(key = "xmeas.separator_cooling_water_outlet_temp")]
+    #[offer(key = "xmeas.separator.cooling_water_outlet_temperature")]
     xmeas_separator_cooling_water_outlet_temp: f64,
 
-    /* Block 36 — 1.0 se qualquer condição de shutdown for verdadeira, 0.0 caso contrário. */
-    #[offer(key = "xmeas.shutdown_detected")]
+    /* Block 36 — 1.0 se qualquer condição de shutdown for verdadeira, 0.0 caso contrário. Prefixo
+    `status.`, não `xmeas.` — não é uma das 41 XMEAS canônicas do TEP, é um diagnóstico à parte
+    (equivalente ao antigo `isd_active` do gRPC).
+    */
+    #[offer(key = "status.shutdown_detected")]
     shutdown_detected: f64,
 }
 
@@ -236,7 +244,7 @@ mod tests {
 
         measured.evaluate();
 
-        let (_, needed) = registry.borrow_mut().subscribe(&[], &["xmeas.reactor_pressure"]);
+        let (_, needed) = registry.borrow_mut().subscribe(&[], &["xmeas.reactor.pressure"]);
         registry.borrow_mut().resolve().expect("chave já ofertada deveria resolver de novo sem erro");
         assert_eq!(needed[0].get(), (2705.0 - 760.0) / 760.0 * 101.325);
     }
@@ -245,7 +253,7 @@ mod tests {
     fn shutdown_detected_flags_reactor_pressure_above_3000_kpa() {
         let registry = StateRegistry::shared();
         let offered = seed_all(&mut registry.borrow_mut());
-        offered[0].set(760.0 + 3000.0 / 101.325 * 760.0 + 1.0); // garante xmeas.reactor_pressure > 3000
+        offered[0].set(760.0 + 3000.0 / 101.325 * 760.0 + 1.0); // garante xmeas.reactor.pressure > 3000
         offered[6].set(35.0);
         offered[8].set(35.0);
 
@@ -255,7 +263,7 @@ mod tests {
 
         measured.evaluate();
 
-        let (_, needed) = registry.borrow_mut().subscribe(&[], &["xmeas.shutdown_detected"]);
+        let (_, needed) = registry.borrow_mut().subscribe(&[], &["status.shutdown_detected"]);
         registry.borrow_mut().resolve().expect("chave já ofertada deveria resolver de novo sem erro");
         assert_eq!(needed[0].get(), 1.0);
     }
@@ -264,7 +272,7 @@ mod tests {
     fn shutdown_not_detected_within_normal_operating_ranges() {
         let registry = StateRegistry::shared();
         let offered = seed_all(&mut registry.borrow_mut());
-        offered[0].set(2705.0); // reactor.pressure — dentro do normal (docs/07-controle.md)
+        offered[0].set(2705.0); // reactor.pressure bruto — dentro do normal (docs/07-controle.md)
         offered[1].set(12.0 * 35.3145); // reactor.liquid_volume — 12 m³ convertido, dentro de [2,24]
         offered[2].set(120.4); // reactor.temperature — dentro de <175
         offered[4].set(6.0 * 35.3145); // separator.liquid_volume — 6 m³, dentro de [1,12]
@@ -278,7 +286,7 @@ mod tests {
 
         measured.evaluate();
 
-        let (_, needed) = registry.borrow_mut().subscribe(&[], &["xmeas.shutdown_detected"]);
+        let (_, needed) = registry.borrow_mut().subscribe(&[], &["status.shutdown_detected"]);
         registry.borrow_mut().resolve().expect("chave já ofertada deveria resolver de novo sem erro");
         assert_eq!(needed[0].get(), 0.0);
     }

@@ -10,7 +10,7 @@ da planta e nada mais a regula.
 */
 #[monjolo::controller(name = "reactor_pressure_control")]
 pub struct ReactorPressureControl {
-    #[sensor(key = "xmeas.reactor_pressure")]
+    #[sensor(key = "xmeas.reactor.pressure")]
     pressure: f64,
     #[actuator(key = "valve.purge.position")]
     purge: f64,
@@ -37,7 +37,7 @@ mod tests {
     use monjolo::state_registry::StateRegistry;
     use std::rc::Rc;
 
-    /* Reproduz xmeas.reactor_pressure (offer bruto, o que Measured faria — já em kPa, não o
+    /* Reproduz xmeas.reactor.pressure (offer bruto, o que Measured faria — já em kPa, não o
     reactor.pressure bruto em mmHg que Reactor publica) + o sensor/atuador reais que o controller
     precisa — mesmo padrão de component.rs::tests, mas contra o controller real da planta. O
     atuador nasce com dinâmica IDENTIDADE (`|command, _state| command`): a derivada que ele publica
@@ -45,9 +45,9 @@ mod tests {
     valor calculado sem expor um getter de `command` só para teste.
     */
     fn seed_registry(registry: &mut StateRegistry, pressure_kpa: f64) -> Rc<ConcreteActuator> {
-        let (offered, _) = registry.subscribe(&["xmeas.reactor_pressure"], &[]);
+        let (offered, _) = registry.subscribe(&["xmeas.reactor.pressure"], &[]);
         offered[0].set(pressure_kpa);
-        ConcreteSensor::new(registry, "xmeas.reactor_pressure", Box::new(Ideal));
+        ConcreteSensor::new(registry, "xmeas.reactor.pressure", Box::new(Ideal));
         ConcreteActuator::new(registry, "valve.purge.position", |command, _state| command)
     }
 
