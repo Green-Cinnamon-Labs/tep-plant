@@ -32,7 +32,10 @@ name = "tep-plant"
 path = "src/main.rs"
 
 [dependencies]
-monjolo = { path = "../monjolo" }
+# `chemistry`: sempre ligada, não espelhada como feature própria (ao contrário de `opcua` abaixo) —
+# entalpia/Antoine/densidade (monjolo::chemistry) são física que o TEP precisa incondicionalmente
+# pra existir, não uma capacidade opcional que quem roda o binário possa querer desligar.
+monjolo = { path = "../monjolo", features = ["chemistry"] }
 
 [features]
 # Espelha a feature `opcua` de monjolo — mesma filosofia (async-opcua + tokio pesados demais pra

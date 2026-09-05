@@ -2,7 +2,7 @@
 
 
 use crate::physics::constants::TepConstants;
-use crate::physics::thermo::temperature_from_enthalpy;
+use monjolo::chemistry::temperature_from_enthalpy;
 
 const COMPRESSOR_VESSEL_VOLUME: f64 = 5000.0; /* volume do vaso do compressor/condensador [m³] */
 const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */

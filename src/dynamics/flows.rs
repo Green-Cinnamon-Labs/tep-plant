@@ -2,7 +2,7 @@
 
 
 use crate::physics::constants::TepConstants;
-use crate::physics::thermo::mixture_enthalpy;
+use monjolo::chemistry::mixture_enthalpy;
 
 const COMPRESSOR_FLOW_MAX: f64 = 280275.0; /* vazão mássica máxima do compressor [kg/h] */
 const COMPRESSOR_PRESSURE_RATIO_MAX: f64 = 1.3;

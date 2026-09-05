@@ -28,7 +28,7 @@ use crate::dynamics::flows::{
     FEED_TEMPERATURE,
 };
 use crate::physics::constants::TepConstants;
-use crate::physics::thermo::mixture_enthalpy;
+use monjolo::chemistry::mixture_enthalpy;
 
 #[monjolo::dynamic_model(after = ["Heat"])]
 pub struct Derivatives {

@@ -2,7 +2,7 @@
 
 
 use crate::physics::constants::TepConstants;
-use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
+use monjolo::chemistry::{liquid_density, temperature_from_enthalpy};
 
 const REACTOR_VOLUME: f64 = 1300.0; /* volume total do vaso do reator [m³] */
 const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */

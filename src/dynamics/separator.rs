@@ -2,7 +2,7 @@
 
 
 use crate::physics::constants::TepConstants;
-use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
+use monjolo::chemistry::{liquid_density, temperature_from_enthalpy};
 
 const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [m³] */
 const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */

@@ -2,7 +2,7 @@
 
 
 use crate::physics::constants::TepConstants;
-use crate::physics::thermo::{liquid_density, temperature_from_enthalpy};
+use monjolo::chemistry::{liquid_density, temperature_from_enthalpy};
 
 #[monjolo::dynamic_model(after = ["Separator"])]
 pub struct Stripper {
