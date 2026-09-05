@@ -23,7 +23,7 @@ vazão por componente, `flows.flash_vapor_component_flow`/`flash_liquid_componen
 exatamente o FCM que a equação precisa, sem precisar normalizar e multiplicar de novo).
 */
 
-use crate::dynamics::flows::{
+use crate::dynamics::feed::{
     FEED_A_COMPOSITION, FEED_AC_COMPOSITION, FEED_D_COMPOSITION, FEED_E_COMPOSITION,
     FEED_TEMPERATURE,
 };
