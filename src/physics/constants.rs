@@ -1,50 +1,24 @@
 /* tep/physics/constants.rs */
 
-/** Constantes físico-químicas do Tennessee Eastman Process. Equivalente ao bloco COMMON /CONST/ do
-FORTRAN. Todos os valores são extraídos diretamente do TEINIT em teprob.f e nunca mudam durante a
-simulação. Indexação: componentes A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7.
+/** Números físico-químicos do Tennessee Eastman Process — o que ESTE crate contribui pra
+`monjolo::chemistry::Coefficients` (as fórmulas em si moram lá, ver `monjolo/chemistry.rs`; aqui só
+os valores, extraídos diretamente do TEINIT em `teprob.f`, que nunca mudam durante a simulação).
+Indexação: componentes A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7.
+
+Newtype (não um `type TepConstants = Coefficients<8>` alias direto) porque o mecanismo de campo
+"comum" de `#[dynamic_model]` (`constants: TepConstants` em `reactor.rs` etc., sem `#[offer]`/
+`#[need]`) inicializa via `Default::default()` — e as regras de orphan do Rust proíbem
+`impl Default for monjolo::chemistry::Coefficients<8>` a partir daqui (nem o trait nem o tipo
+genérico são locais a este crate). `Deref<Target = Coefficients<8>>` deixa `self.constants.avp[i]`
+e `mixture_enthalpy(&z, t, ity, &self.constants)` funcionando exatamente como antes, sem mudar
+nenhum site de chamada — só o `impl Default` mora aqui, não o `impl Deref` sendo contornado.
 */
-pub struct TepConstants {
-    /** Massas molares [g/mol]
-    */
-    pub xmw: [f64; 8],
-
-    /** Coeficientes da equação de Antoine para pressão de vapor. ln(P_vap) = AVP + BVP / (T + CVP).
-    Componentes 1–3 (A, B, C) são gases ideais → coef. = 0.
-    */
-    pub avp: [f64; 8],
-    pub bvp: [f64; 8],
-    pub cvp: [f64; 8],
-
-    /** Coeficientes de densidade líquida empírica. ρ = 1 / Σ( x_i * XMW_i / (AD_i + (BD_i +
-    CD_i*T)*T) )
-    */
-    pub ad: [f64; 8],
-    pub bd: [f64; 8],
-    pub cd: [f64; 8],
-
-    /** Coeficientes de entalpia para fase líquida. H_i(T) = T * (AH + BH*T/2 + CH*T²/3) * 1.8
-    */
-    pub ah: [f64; 8],
-    pub bh: [f64; 8],
-    pub ch: [f64; 8],
-
-    /** Coeficientes de entalpia para fase vapor. H_i(T) = T * (AG + BG*T/2 + CG*T²/3) * 1.8 + AV
-    */
-    pub ag: [f64; 8],
-    pub bg: [f64; 8],
-    pub cg: [f64; 8],
-
-    /** Entalpia de vaporização [cal/mol] (offset para fase vapor)
-    */
-    pub av: [f64; 8],
-}
+pub struct TepConstants(monjolo::chemistry::Coefficients<8>);
 
 impl TepConstants {
-    /** Inicializa todas as constantes com os valores do TEINIT (teprob.f)
-    */
+    /** Inicializa todas as constantes com os valores do TEINIT (teprob.f) */
     pub fn new() -> Self {
-        Self {
+        Self(monjolo::chemistry::Coefficients {
             /* --- Massas molares --- */
             xmw: [2.0, 25.4, 28.0, 32.0, 46.0, 48.0, 62.0, 76.0],
 
@@ -72,12 +46,20 @@ impl TepConstants {
 
             /* --- Entalpia de vaporização --- */
             av: [1.0e-6, 1.0e-6, 1.0e-6, 86.7e-6, 160.0e-6, 160.0e-6, 225.0e-6, 209.0e-6],
-        }
+        })
     }
 }
 
 impl Default for TepConstants {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl std::ops::Deref for TepConstants {
+    type Target = monjolo::chemistry::Coefficients<8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

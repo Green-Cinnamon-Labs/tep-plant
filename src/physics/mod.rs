@@ -1,8 +1,8 @@
 /* tep/physics/mod.rs */
 
-/** Helpers de física compartilhados entre os subsistemas (constantes do TEP e correlações
-termodinâmicas) — não são um subsistema em si, ninguém aqui implementa DynamicModel.
+/** Números do TEP compartilhados entre os subsistemas (`TepConstants`) — não é um subsistema em
+si, ninguém aqui implementa DynamicModel. As correlações termodinâmicas em si (entalpia, Antoine,
+densidade) moram em `monjolo::chemistry` (feature `chemistry`) — genéricas, não específicas do TEP.
 */
 
 pub mod constants;
-pub mod thermo;
