@@ -14,7 +14,7 @@ saída). De `heat.rs`: Block 34 (condenser/reboiler) + o próprio `condenser_ua`
 nunca tinha dono, só usado aqui mesmo). De `derivatives.rs`: a seção "Stripper" do balanço de
 massa/energia (Block 40, YP(19..27)). De `product_analyzer.rs`: XMEAS 37-41 (Product Analysis).
 */
-#[monjolo::dynamic_model(after = ["Separator"], tasks)]
+#[monjolo::dynamic_model(tasks)]
 pub struct Stripper {
     #[state]
     #[config(prefix = "state.stripper_liquid", components = ["A", "B", "C", "D", "E", "F", "G", "H"])]

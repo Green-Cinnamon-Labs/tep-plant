@@ -16,7 +16,7 @@ surge, slot 8 — separador→compressor, mas é a curva do PRÓPRIO compressor 
 puxa, daí o dono ser este arquivo), Block 31 (slot 6, bypass = cópia do slot 5). Absorve de
 `derivatives.rs`: a seção "Compressor" do balanço de massa/energia (Block 40, YP(28..36)).
 */
-#[monjolo::dynamic_model(after = ["Stripper"], tasks)]
+#[monjolo::dynamic_model(tasks)]
 pub struct Compressor {
     #[state]
     #[config(prefix = "state.compressor_vapor", components = ["A", "B", "C", "D", "E", "F", "G", "H"])]

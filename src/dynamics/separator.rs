@@ -14,7 +14,7 @@ Compressor. Absorve de `flows.rs`: Block 22/25 (slots 9/10, purge e underflow). 
 Block 33 (troca térmica do separador). De `derivatives.rs`: a seção "Separador" do balanço de
 massa/energia (Block 40, YP(10..18)). De `purge_analyzer.rs`: XMEAS 29-36 (Purge Gas Analysis).
 */
-#[monjolo::dynamic_model(after = ["Reactor"], tasks)]
+#[monjolo::dynamic_model(tasks)]
 pub struct Separator {
     /* Estado próprio (9 números) — mesmo split de Reactor, mesmo motivo (chave de config não
     uniforme entre vapor/líquido e entalpia).

@@ -1,12 +1,13 @@
 /* tep/dynamics/measured.rs */
 
 
-/* `after = ["Derivatives"]`, não `["Heat"]` — Measured não lê nada que Derivatives escreve (só
-`.derivative`, que Measured nunca consome), mas a cadeia única da fase (A) continua sendo um elo só
-(ver `monjolo::component`, "Cadeia única, de propósito"): Derivatives é o novo último elo antes de
-Measured, então é ele quem entra aqui agora.
+/* Sem `after` declarado: `flows.rs`/`heat.rs`/`derivatives.rs` (de quem Measured dependia
+indiretamente por `after` no passado) foram totalmente dissolvidos nas 5 unidades (issue 10) — a
+ordem correta sai inteira do casamento automático de `needs`/`offers`
+(`monjolo::component::sort_phase_a`). Measured em si ainda não foi dissolvido (fica pra um passo
+seguinte, junto com `status.shutdown_detected` virando `diagnostics::shutdown_detector`).
 */
-#[monjolo::dynamic_model(after = ["Derivatives"])]
+#[monjolo::dynamic_model]
 pub struct Measured {
     #[need(key = "reactor.pressure")]
     reactor_pressure: f64,
