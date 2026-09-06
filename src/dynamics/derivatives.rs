@@ -23,10 +23,7 @@ vazão por componente, `flows.flash_vapor_component_flow`/`flash_liquid_componen
 exatamente o FCM que a equação precisa, sem precisar normalizar e multiplicar de novo).
 */
 
-use crate::dynamics::feed::{
-    FEED_A_COMPOSITION, FEED_AC_COMPOSITION, FEED_D_COMPOSITION, FEED_E_COMPOSITION,
-    FEED_TEMPERATURE,
-};
+use crate::dynamics::feed::{FEED_AC_COMPOSITION, FEED_TEMPERATURE};
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::mixture_enthalpy;
 
@@ -93,10 +90,11 @@ pub struct Derivatives {
     #[offer(key = "stripper.state.8.derivative")]
     stripper_enthalpy_derivative: f64,
 
-    #[offer(prefix = "compressor.state", components = ["0.derivative", "1.derivative", "2.derivative", "3.derivative", "4.derivative", "5.derivative", "6.derivative", "7.derivative"])]
-    compressor_vapor_derivative: [f64; 8],
-    #[offer(key = "compressor.state.8.derivative")]
-    compressor_enthalpy_derivative: f64,
+    /* Compressor tem seu próprio balanço agora — ver `dynamics::compressor::yp_derivative` (issue
+    10). `compressor.temperature`/`compressor.vapor_composition` continuam precisos aqui: entram
+    no termo de RECYCLE do Reator (`enthalpy_compressor_recycle`/`compressor_vapor[i] * flow[6]`),
+    não só no balanço do próprio compressor.
+    */
 }
 
 impl Derivatives {
@@ -118,11 +116,9 @@ impl Derivatives {
         let flash_liquid_flow = self.flash_liquid_component_flow(); /* FCM(·,12) — nosso slot 11 */
 
         /* Entalpias das streams — reconstruídas de composição+temperatura já publicadas (Blocks
-        20-21), exceto as 3 que só existem dentro de Flows (flash e a correção do compressor).
+        20-21). Entalpias dos feeds D/E/A saíram junto com o balanço do compressor (ver
+        `dynamics::compressor::yp_derivative`) — só a do A&C fica, usada pelo Stripper abaixo.
         */
-        let enthalpy_feed_d = mixture_enthalpy(&FEED_D_COMPOSITION, FEED_TEMPERATURE, 1, &constants);
-        let enthalpy_feed_e = mixture_enthalpy(&FEED_E_COMPOSITION, FEED_TEMPERATURE, 1, &constants);
-        let enthalpy_feed_a = mixture_enthalpy(&FEED_A_COMPOSITION, FEED_TEMPERATURE, 1, &constants);
         let enthalpy_feed_ac = mixture_enthalpy(&FEED_AC_COMPOSITION, FEED_TEMPERATURE, 1, &constants);
         /* slot 5 (recycle do compressor) e slot 6 (bypass, cópia de 5) — mesma entalpia. */
         let enthalpy_compressor_recycle = mixture_enthalpy(&compressor_vapor, compressor_temperature, 1, &constants);
@@ -199,23 +195,6 @@ impl Derivatives {
             - enthalpy_stripper_liquid * flow[12]
             + self.condenser_heat();
 
-        /* ===== Compressor — YP(28..35), YP(36): FCM(·,1)+FCM(·,2)+FCM(·,3)+FCM(·,5)+FCM(·,9)-FCM(·,6) ===== */
-        let mut compressor_vapor_derivative = [0.0f64; 8];
-        for i in 0..8 {
-            compressor_vapor_derivative[i] = FEED_D_COMPOSITION[i] * flow[0]
-                + FEED_E_COMPOSITION[i] * flow[1]
-                + FEED_A_COMPOSITION[i] * flow[2]
-                + flash_vapor_flow[i]
-                + separator_vapor[i] * flow[8]
-                - compressor_vapor[i] * flow[5];
-        }
-        let compressor_enthalpy_derivative = enthalpy_feed_d * flow[0]
-            + enthalpy_feed_e * flow[1]
-            + enthalpy_feed_a * flow[2]
-            + enthalpy_flash_vapor * flow[4]
-            + compressor_discharge_enthalpy * flow[8]
-            - enthalpy_compressor_recycle * flow[5];
-
         self.set_reactor_vapor_derivative(reactor_vapor_derivative);
         self.set_reactor_liquid_derivative(reactor_liquid_derivative);
         self.set_reactor_enthalpy_derivative(reactor_enthalpy_derivative);
@@ -224,8 +203,6 @@ impl Derivatives {
         self.set_separator_enthalpy_derivative(separator_enthalpy_derivative);
         self.set_stripper_liquid_derivative(stripper_liquid_derivative);
         self.set_stripper_enthalpy_derivative(stripper_enthalpy_derivative);
-        self.set_compressor_vapor_derivative(compressor_vapor_derivative);
-        self.set_compressor_enthalpy_derivative(compressor_enthalpy_derivative);
     }
 }
 
@@ -481,47 +458,9 @@ mod tests {
         assert_eq!(out[0].get(), 7.0);
     }
 
-    #[test]
-    fn compressor_mass_derivative_includes_feed_flash_and_separator_terms() {
-        let registry = StateRegistry::shared();
-        let seeded = seed_registry(&mut registry.borrow_mut());
-        let flow_d = 2.0;
-        seeded.stream_flow[0].set(flow_d);
-        seeded.flash_vapor_component_flow[0].set(7.0); // componente 0
-        seeded.separator_vapor_composition[4].set(4.0); // componente 4
-        let flow_8 = 2.0;
-        seeded.stream_flow[8].set(flow_8);
-        // flow[1]/flow[2]/flow[5] ficam em 0.0 — zera feed E, feed A e o termo de recycle
-
-        let config = Snapshot::from_pairs(&[]);
-        let derivatives = Derivatives::new(&mut registry.borrow_mut(), &config);
-        registry.borrow_mut().resolve().expect("todo input deveria ter provedor");
-
-        derivatives.evaluate();
-
-        let out = read_back(
-            &mut registry.borrow_mut(),
-            &["compressor.state.0.derivative", "compressor.state.4.derivative"],
-        );
-        assert_eq!(out[0].get(), FEED_D_COMPOSITION[0] * flow_d + 7.0);
-        assert_eq!(out[1].get(), FEED_D_COMPOSITION[4] * flow_d + 4.0 * flow_8);
-    }
-
-    #[test]
-    fn compressor_energy_derivative_is_zero_when_all_flows_are_zero() {
-        let registry = StateRegistry::shared();
-        let seeded = seed_registry(&mut registry.borrow_mut());
-        seeded.reactor_heat.set(999.0); // não deveria vazar pra cá — só reactor tem termo de calor
-
-        let config = Snapshot::from_pairs(&[]);
-        let derivatives = Derivatives::new(&mut registry.borrow_mut(), &config);
-        registry.borrow_mut().resolve().expect("todo input deveria ter provedor");
-
-        derivatives.evaluate();
-
-        let out = read_back(&mut registry.borrow_mut(), &["compressor.state.8.derivative"]);
-        assert_eq!(out[0].get(), 0.0, "sem termo de calor próprio — só soma entalpia*vazão, tudo zerado aqui");
-    }
+    /* Balanço do Compressor (antes testado aqui) saiu pra `dynamics::compressor::yp_derivative`
+    (issue 10) — cobertura equivalente mora lá agora.
+    */
 
     #[test]
     fn evaluate_does_not_panic_with_realistic_operating_values() {
@@ -580,8 +519,6 @@ mod tests {
         ];
         for c in ["0", "1", "2", "3", "4", "5", "6", "7"] { keys.push(format!("stripper.state.{c}.derivative")); }
         keys.push("stripper.state.8.derivative".to_string());
-        for c in ["0", "1", "2", "3", "4", "5", "6", "7"] { keys.push(format!("compressor.state.{c}.derivative")); }
-        keys.push("compressor.state.8.derivative".to_string());
 
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let out = read_back(&mut registry.borrow_mut(), &key_refs);
