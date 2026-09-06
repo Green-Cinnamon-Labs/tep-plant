@@ -1,4 +1,4 @@
-/* tep/dynamics/mod.rs */
+/* tep/units/mod.rs */
 
 /** Os 5 blocos químicos do TEP: Feed/Reactor/Separator/Stripper/Compressor, todos `#[monjolo::
 tasks]` (issue 10) — vários métodos nomeados por unidade, cada um seu próprio `needs`/`offers`.

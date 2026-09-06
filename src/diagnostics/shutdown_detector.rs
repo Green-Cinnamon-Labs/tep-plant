@@ -1,9 +1,9 @@
 /* tep/diagnostics/shutdown_detector.rs */
 
 /** Detecção de shutdown (Block 36 de teprob.f) — 1.0 se qualquer condição de segurança for
-violada, 0.0 caso contrário. Migrado de `dynamics::measured` (issue 10): é o único pedaço de
-`Measured` sem dono natural — agrega Reactor/Separator/Stripper ao mesmo tempo, então não faz
-sentido virar tarefa de nenhuma unidade específica. Fica fora de `dynamics/` (não é um acumulador
+violada, 0.0 caso contrário. Migrado do antigo `dynamics/measured.rs` (issue 10): é o único pedaço
+de `Measured` sem dono natural — agrega Reactor/Separator/Stripper ao mesmo tempo, então não faz
+sentido virar tarefa de nenhuma unidade específica. Fica fora de `units/` (não é um acumulador
 físico) num módulo próprio, `diagnostics`.
 
 Prefixo `status.`, não `xmeas.` — não é uma das 41 XMEAS canônicas do TEP, é um diagnóstico à parte

@@ -23,7 +23,7 @@ Roda com: cargo run --bin tep-plant [--features opcua]
 /* `extern crate tennessee_eastman_process;` não é resquício de edição antiga (2018+ não precisa
 disso pra USAR um crate) — é a única forma de o linker incluir o crate no binário final quando NADA
 aqui referencia um símbolo dele por nome. Sem isso, `cargo build` compila a lib normalmente, mas o
-`.exe` final não puxa o código de `actuators/`/`sensors/`/`controllers/`/`dynamics/` do `.rlib` —
+`.exe` final não puxa o código de `actuators/`/`sensors/`/`controllers/`/`units/` do `.rlib` —
 cada `inventory::submit!` escondido nesses módulos nunca roda, e `Simulation::run()` descobre zero
 componentes (não é bug de `inventory`; é assim que Rust sempre linkou binário↔biblioteca — só ficou
 visível agora que main() não chama mais nada da lib por nome).

@@ -1,4 +1,4 @@
-/* tep/dynamics/separator.rs */
+/* tep/units/separator.rs */
 
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};

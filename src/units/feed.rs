@@ -1,11 +1,11 @@
-/* tep/dynamics/feed.rs */
+/* tep/units/feed.rs */
 
 /** As 4 alimentações externas do TEP (D/E/A/A+C) — sem inventário próprio (nenhuma EDO, nenhum
 `#[state]`: são puramente vazão-por-posição-de-válvula, sem acumulação física nenhuma), mas com
 identidade própria o bastante pra merecer uma unidade: cada uma tem sua composição fixa (TEINIT),
 sua faixa de válvula (VRNG) e, pras duas medidas por massa (D/E), seu próprio peso molecular.
 
-Migrado de `dynamics::flows` (issue 10, spec-tennessee-eastman) — antes, essas 4 vazões e os 2
+Migrado do antigo `dynamics/flows.rs` (issue 10, spec-tennessee-eastman) — antes, essas 4 vazões e os 2
 pesos moleculares eram calculados dentro de `Flows::compute()`, sem nenhum dono próprio. As chaves
 publicadas (`flows.stream_flow.0..3`, `flows.d_feed_mol_weight`/`.e_feed_mol_weight`) continuam
 EXATAMENTE as mesmas — só quem as publica mudou; `Flows`/`Derivatives`/`Measured` continuam lendo
@@ -21,8 +21,8 @@ const FEED_A_RANGE: f64 = 100.0;
 const FEED_AC_RANGE: f64 = 1500.0;
 
 /* Composições nominais dos feeds puros (TEINIT) — índice de componente A=0,B=1,C=2,D=3,E=4,F=5,
-G=6,H=7, mesma convenção de physics/constants.rs. `pub(crate)` — `dynamics::flows`/
-`dynamics::derivatives` reusam FEED_AC_COMPOSITION/FEED_D_COMPOSITION/etc. pro balanço de massa/
+G=6,H=7, mesma convenção de physics/constants.rs. `pub(crate)` — Compressor/Stripper (via
+`crate::units::feed::{...}`) reusam FEED_AC_COMPOSITION/FEED_D_COMPOSITION/etc. pro balanço de massa/
 energia do compressor e pro flash do stripper, em vez de duplicar os números.
 */
 pub(crate) const FEED_D_COMPOSITION: [f64; 8] = [0.0, 0.0001, 0.0, 0.9999, 0.0, 0.0, 0.0, 0.0];

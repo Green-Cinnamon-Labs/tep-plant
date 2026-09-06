@@ -1,6 +1,6 @@
-/* tep/dynamics/stripper.rs */
+/* tep/units/stripper.rs */
 
-use crate::dynamics::feed::{FEED_AC_COMPOSITION, FEED_TEMPERATURE};
+use crate::units::feed::{FEED_AC_COMPOSITION, FEED_TEMPERATURE};
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
 

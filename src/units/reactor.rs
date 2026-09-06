@@ -1,4 +1,4 @@
-/* tep/dynamics/reactor.rs */
+/* tep/units/reactor.rs */
 
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
@@ -14,7 +14,7 @@ const REACTOR_COOLING_WATER_RETURN: f64 = 35.0;
 
 /** Quinta e última unidade migrada pro scheduler de dataflow topológico (issue 10) — fecha a
 migração. Absorve de `flows.rs`: Block 22 (AGSP/agitation_factor — fundido direto em `heat`, sem
-publicar chave própria, mesmo tratamento de `condenser_ua` em `dynamics::stripper`) e Block 23
+publicar chave própria, mesmo tratamento de `condenser_ua` em `units::stripper`) e Block 23
 (slot 7, reator→separador). De `heat.rs`: Block 32 (troca térmica do reator). De `derivatives.rs`:
 a seção "Reator" do balanço de massa/energia (Block 40, YP(1..9)) — a última EDO que não calculava
 a própria derivada. `flows.rs`/`heat.rs`/`derivatives.rs` são deletados junto com este commit —
@@ -169,7 +169,7 @@ impl Reactor {
     }
 
     /* Bloco 3 (ex-Heat, Block 32 + o AGSP de Block 22, que nunca teve dono além de ser consumido
-    aqui mesmo — mesmo tratamento do `condenser_ua` em `dynamics::stripper`): troca térmica no
+    aqui mesmo — mesmo tratamento do `condenser_ua` em `units::stripper`): troca térmica no
     reator — UARLEV degrau/rampa/platô conforme o nível de líquido.
     */
     #[need(key = "reactor.liquid_volume")]

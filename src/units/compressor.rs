@@ -1,6 +1,6 @@
-/* tep/dynamics/compressor.rs */
+/* tep/units/compressor.rs */
 
-use crate::dynamics::feed::{FEED_A_COMPOSITION, FEED_D_COMPOSITION, FEED_E_COMPOSITION, FEED_TEMPERATURE};
+use crate::units::feed::{FEED_A_COMPOSITION, FEED_D_COMPOSITION, FEED_E_COMPOSITION, FEED_TEMPERATURE};
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::{mixture_enthalpy, temperature_from_enthalpy};
 
