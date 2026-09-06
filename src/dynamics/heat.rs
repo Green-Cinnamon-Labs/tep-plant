@@ -1,11 +1,11 @@
 /* tep/dynamics/heat.rs */
 
-
 /* Nominal — mesmo `s_zero` de TepDisturbanceState, canal 4 (TCWR, "reactor cooling water temp"). */
 const REACTOR_COOLING_WATER_RETURN: f64 = 35.0;
-/* Nominal — mesmo `s_zero` de TepDisturbanceState, canal 5 (TCWS, "condenser cooling water temp"). */
-const SEPARATOR_COOLING_WATER_RETURN: f64 = 40.0;
 
+/* Block 33 (troca térmica do separador) saiu pra `dynamics::separator::heat` (issue 10) — Heat
+fica só com Block 32 (reator) e Block 34 (stripper).
+*/
 #[monjolo::dynamic_model(after = ["Flows"])]
 pub struct Heat {
     #[need(key = "reactor.liquid_volume")]
@@ -17,26 +17,20 @@ pub struct Heat {
 
     #[need(key = "flows.agitation_factor")]
     agitation_factor: f64,
-    #[need(key = "flows.stream_flow.7")]
-    reactor_to_separator_flow: f64,
     #[need(key = "flows.condenser_ua")]
     condenser_ua: f64,
 
     #[offer(key = "heat.reactor_heat")]
     reactor_heat: f64,
-    #[offer(key = "heat.separator_heat")]
-    separator_heat: f64,
     #[offer(key = "heat.condenser_heat")]
     condenser_heat: f64,
 
-    /* XMEAS(21)/XMEAS(22) (Measured) leem estes dois — publicados aqui porque são os mesmos
-    nominais que `evaluate()` já usa internamente (ver comentário do topo do arquivo); sem isso,
-    Measured precisaria duplicar as duas constantes.
+    /* XMEAS(21) (Measured) lê este — publicado aqui porque é o mesmo nominal que `evaluate()` já
+    usa internamente (ver comentário do topo do arquivo); sem isso, Measured precisaria duplicar
+    a constante. XMEAS(22) (separator) é publicado por `dynamics::separator::heat` agora.
     */
     #[offer(key = "heat.reactor_cooling_water_return")]
     reactor_cooling_water_return: f64,
-    #[offer(key = "heat.separator_cooling_water_return")]
-    separator_cooling_water_return: f64,
 }
 
 impl Heat {
@@ -61,13 +55,6 @@ impl Heat {
         let uar = uar_level * (-0.5 * agitation_factor * agitation_factor + 2.75 * agitation_factor - 2.5) * 855490e-6;
         let reactor_heat = uar * (REACTOR_COOLING_WATER_RETURN - reactor_temperature) * (1.0 - 0.35 * 0.0);
 
-        /* Block 33: troca térmica no separador — UAS depende da vazão reator→separador
-        (flows.stream_flow.7); a temperatura de referência é a do REATOR (não do separador — TST(8)
-        aponta pro reator no teprob.f, Block 20), preservado por fidelidade.
-        */
-        let uas = 0.404655 * (1.0 - 1.0 / (1.0 + (self.reactor_to_separator_flow() / 3528.73).powi(4)));
-        let separator_heat = uas * (SEPARATOR_COOLING_WATER_RETURN - reactor_temperature) * (1.0 - 0.25 * 0.0);
-
         /* Block 34: resfriamento condicional (reboiler do stripper) — só troca calor se a
         temperatura do stripper estiver abaixo de 100°C (ponto de ebulição da água a 1 atm).
         */
@@ -78,10 +65,8 @@ impl Heat {
         };
 
         self.set_reactor_heat(reactor_heat);
-        self.set_separator_heat(separator_heat);
         self.set_condenser_heat(condenser_heat);
         self.set_reactor_cooling_water_return(REACTOR_COOLING_WATER_RETURN);
-        self.set_separator_cooling_water_return(SEPARATOR_COOLING_WATER_RETURN);
     }
 }
 
@@ -98,12 +83,12 @@ mod tests {
         let (offered, _) = registry.borrow_mut().subscribe(
             &[
                 "reactor.liquid_volume", "reactor.temperature", "stripper.temperature",
-                "flows.agitation_factor", "flows.stream_flow.7", "flows.condenser_ua",
+                "flows.agitation_factor", "flows.condenser_ua",
             ],
             &[],
         );
         offered[2].set(120.0); // stripper.temperature > 100 → sem troca
-        offered[5].set(500.0); // condenser_ua irrelevante nesse caso
+        offered[4].set(500.0); // condenser_ua irrelevante nesse caso
 
         let config = Snapshot::from_pairs(&[]);
         let heat = Heat::new(&mut registry.borrow_mut(), &config);
@@ -122,12 +107,12 @@ mod tests {
         let (offered, _) = registry.borrow_mut().subscribe(
             &[
                 "reactor.liquid_volume", "reactor.temperature", "stripper.temperature",
-                "flows.agitation_factor", "flows.stream_flow.7", "flows.condenser_ua",
+                "flows.agitation_factor", "flows.condenser_ua",
             ],
             &[],
         );
         offered[2].set(65.0); // stripper.temperature < 100
-        offered[5].set(10.0); // condenser_ua
+        offered[4].set(10.0); // condenser_ua
 
         let config = Snapshot::from_pairs(&[]);
         let heat = Heat::new(&mut registry.borrow_mut(), &config);
@@ -146,7 +131,7 @@ mod tests {
         let (offered, _) = registry.borrow_mut().subscribe(
             &[
                 "reactor.liquid_volume", "reactor.temperature", "stripper.temperature",
-                "flows.agitation_factor", "flows.stream_flow.7", "flows.condenser_ua",
+                "flows.agitation_factor", "flows.condenser_ua",
             ],
             &[],
         );
@@ -154,8 +139,7 @@ mod tests {
         offered[1].set(120.4); // reactor.temperature
         offered[2].set(65.7); // stripper.temperature
         offered[3].set(1.7); // agitation_factor (AGSP a ~20% = (20+150)/100)
-        offered[4].set(9077.5); // flows.stream_flow.7, reator->separador em operação normal
-        offered[5].set(9.5); // flows.condenser_ua
+        offered[4].set(9.5); // flows.condenser_ua
 
         let config = Snapshot::from_pairs(&[]);
         let heat = Heat::new(&mut registry.borrow_mut(), &config);

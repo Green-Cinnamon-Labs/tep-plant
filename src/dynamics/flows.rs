@@ -8,9 +8,9 @@ use monjolo::chemistry::mixture_enthalpy;
 /* Vazão máxima de cada válvula com curva linear (posição% * range / 100) — VRNG em TEINIT,
 indexado pela MESMA identidade física da válvula (não pelo número XMV, que difere do slot interno).
 Feed D/E/A/AC saíram daqui — ver `dynamics::feed` (issue 10). Compressor (slots 5/6/8, curva
-característica) também saiu — ver `dynamics::compressor` (issue 10).
+característica) e Separator (slots 9/10, purge+underflow) também saíram — ver
+`dynamics::compressor`/`dynamics::separator`.
 */
-const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0;
 const STRIPPER_PRODUCT_RANGE: f64 = 1000.0;
 const STRIPPER_STEAM_RANGE: f64 = 0.03;
 
@@ -50,10 +50,13 @@ pub struct Flows {
     */
     #[need(key = "flows.stream_flow.3")]
     ac_feed_flow: f64,
-    #[need(key = "valve.purge.position")]
-    purge_position: f64,
-    #[need(key = "valve.separator_underflow.position")]
-    separator_underflow_position: f64,
+    /* Slot 10 (underflow) precisa ser LIDO de volta (não mais calculado aqui) — o split do flash
+    (Block 25/26 abaixo) genuinamente consome essa vazão; `Separator` é quem agora a computa a
+    partir da própria válvula (`dynamics::separator::outlet_flows`). Slot 9 (purge) some sem
+    substituto — nada aqui consumia de volta, só repassava pra `stream_flows`.
+    */
+    #[need(key = "flows.stream_flow.10")]
+    underflow_flow: f64,
     #[need(key = "valve.stripper_product.position")]
     stripper_product_position: f64,
     #[need(key = "valve.stripper_steam.position")]
@@ -61,12 +64,12 @@ pub struct Flows {
     #[need(key = "agitator.speed")]
     agitator_speed: f64,
 
-    /* Vazão molar dos slots 4/7/9/10/11/12 (kmol/h) — ver mapeamento no topo do arquivo. Slots 0-3
-    (feeds) são ofertados por `Feed`; slots 5/6/8 (compressor) por `Compressor` — mesma chave
-    (`flows.stream_flow.N`), dono diferente.
+    /* Vazão molar dos slots 4/7/11/12 (kmol/h) — ver mapeamento no topo do arquivo. Slots 0-3
+    (feeds) são ofertados por `Feed`; slots 5/6/8 (compressor) por `Compressor`; slots 9/10
+    (purge/underflow) por `Separator` — mesma chave (`flows.stream_flow.N`), dono diferente.
     */
-    #[offer(prefix = "flows.stream_flow", components = ["4", "7", "9", "10", "11", "12"])]
-    stream_flows: [f64; 6],
+    #[offer(prefix = "flows.stream_flow", components = ["4", "7", "11", "12"])]
+    stream_flows: [f64; 4],
 
     #[offer(key = "flows.condenser_ua")]
     condenser_ua: f64,
@@ -109,17 +112,15 @@ impl Flows {
         composition[3] = FEED_AC_COMPOSITION;
         composition[7] = reactor_vapor;
         composition[8] = separator_vapor;
-        composition[9] = separator_vapor; /* slot 9 (purge) sai do mesmo vapor do separador que o slot 8 */
         composition[10] = separator_liquid;
         composition[12] = stripper_liquid;
 
         let constants = TepConstants::new();
 
-        /* Block 19 (cont.): pesos moleculares médios — só os slots que o resto do bloco precisa
-        pra si mesmo (7, 9). Slots 0/1 (D/E) são responsabilidade de `Feed`
-        (`flows.d_feed_mol_weight`/`.e_feed_mol_weight`); slots 5/8 (compressor), de `Compressor`
-        (que recalcula os próprios mw[5]/mw[8] em `outlet_flows`, sem depender de nada publicado
-        aqui).
+        /* Block 19 (cont.): pesos moleculares médios — só o slot que o resto do bloco precisa pra
+        si mesmo (7). Slots 0/1 (D/E) são responsabilidade de `Feed`; slots 5/8 (compressor) e 9
+        (purge), de `Compressor`/`Separator` (cada um recalcula seu próprio mw em `outlet_flows`,
+        sem depender de nada publicado aqui).
         */
         let mol_weight = |z: &[f64; 8]| -> f64 { (0..8).map(|i| z[i] * constants.xmw[i]).sum() };
         let mw = [
@@ -132,7 +133,7 @@ impl Flows {
             0.0,
             mol_weight(&composition[7]),
             0.0,
-            mol_weight(&composition[9]),
+            0.0,
             0.0,
             0.0,
             0.0,
@@ -144,7 +145,6 @@ impl Flows {
         let mut temperature = [0.0f64; 13];
         temperature[7] = reactor_temperature;
         temperature[8] = separator_temperature;
-        temperature[9] = separator_temperature;
         temperature[10] = separator_temperature;
         temperature[12] = stripper_temperature;
 
@@ -172,16 +172,18 @@ impl Flows {
         let agitation_factor = (self.agitator_speed() + 150.0) / 100.0;
 
         /* Block 23: fluxos dependentes de ΔP (sem válvula). Slot 5 (compressor↔reator) saiu pra
-        `Compressor` — ver `dynamics::compressor::outlet_flows`.
+        `Compressor` — ver `dynamics::compressor::outlet_flows`. Slot 10 (underflow) é LIDO de
+        volta, não mais calculado — `Separator` é quem publica agora, mas o split do flash abaixo
+        continua precisando do valor.
         */
         flow[7] = 4574.21 * (reactor_pressure - separator_pressure).max(0.0).sqrt() * (1.0 - 0.25 * 0.0) / mw[7]; /* disturbance channel 11, neutro */
-        flow[10] = self.separator_underflow_position() * SEPARATOR_UNDERFLOW_RANGE / 100.0;
+        flow[10] = self.underflow_flow();
         flow[12] = self.stripper_product_position() * STRIPPER_PRODUCT_RANGE / 100.0;
 
-        /* Block 24 (curva característica + anti-surge do compressor, slot 8) saiu inteiro pra
-        `Compressor` — ver `dynamics::compressor::outlet_flows`.
+        /* Block 24 (curva característica + anti-surge do compressor, slot 8) e o cálculo de purge
+        (slot 9) saíram inteiros pra `Compressor`/`Separator` — ver
+        `dynamics::compressor::outlet_flows`/`dynamics::separator::outlet_flows`.
         */
-        flow[9] = self.purge_position() * 0.151169 * (separator_pressure - 760.0).max(0.0).sqrt() / mw[9];
 
         /* Block 25: vazão por componente, slot a slot (só os que o split de Block 26-29 usa como
         entrada: slots 3 e 10 — A&C feed e underflow do separador).
@@ -249,7 +251,7 @@ impl Flows {
         /* Block 31 (bypass, slot 6 = cópia do slot 5) saiu junto com o resto do compressor — ver
         `dynamics::compressor::outlet_flows`.
         */
-        self.set_stream_flows([flow[4], flow[7], flow[9], flow[10], flow[11], flow[12]]);
+        self.set_stream_flows([flow[4], flow[7], flow[11], flow[12]]);
         self.set_condenser_ua(condenser_ua);
         self.set_agitation_factor(agitation_factor);
         self.set_flash_vapor_component_flow(component_flow_4);
@@ -266,17 +268,19 @@ mod tests {
 
     /* Oferece manualmente as chaves que Flows precisa (o que Reactor/Separator/Stripper/Feed/
     atuadores normalmente ofertam sozinhos) — vapor de reactor/separator fica em A puro (100%) só
-    pra evitar divisão por zero nos pesos moleculares (mw[7]/mw[9] dependem da composição); os
-    valores de interesse do teste (vazão A&C, pressões) são passados explicitamente. Compressor
-    saiu inteiro das dependências de Flows (issue 10) — nenhuma chave dele é seedada aqui mais.
-    `flows.stream_flow.3` é seedada direto aqui (não via `Feed`, que não faz parte deste teste
-    isolado) — mesma chave que `Feed::ac_feed_flow` ofereceria em produção.
+    pra evitar divisão por zero no peso molecular (mw[7] depende da composição do reator); os
+    valores de interesse do teste (vazão A&C, underflow, pressões) são passados explicitamente.
+    Compressor/Separator saíram inteiros das dependências de Flows (issue 10) — nenhuma chave de
+    válvula deles é seedada aqui mais. `flows.stream_flow.3`/`.10` são seedadas direto aqui (não
+    via `Feed`/`Separator`, que não fazem parte deste teste isolado) — mesmas chaves que eles
+    ofertariam em produção.
     */
     fn seed_registry(
         registry: &mut StateRegistry,
         reactor_pressure: f64,
         separator_pressure: f64,
         ac_feed_flow: f64,
+        underflow_flow: f64,
         agitator_speed: f64,
         stripper_steam_position: f64,
     ) {
@@ -284,9 +288,8 @@ mod tests {
             "reactor.temperature", "reactor.pressure",
             "separator.temperature", "separator.pressure",
             "stripper.temperature",
-            "flows.stream_flow.3",
-            "valve.purge.position",
-            "valve.separator_underflow.position", "valve.stripper_product.position",
+            "flows.stream_flow.3", "flows.stream_flow.10",
+            "valve.stripper_product.position",
             "valve.stripper_steam.position", "agitator.speed",
         ];
         let mut composition_keys = Vec::new();
@@ -304,15 +307,16 @@ mod tests {
         offered[1].set(reactor_pressure);
         offered[3].set(separator_pressure);
         offered[5].set(ac_feed_flow);
-        offered[9].set(stripper_steam_position);
-        offered[10].set(agitator_speed);
+        offered[6].set(underflow_flow);
+        offered[8].set(stripper_steam_position);
+        offered[9].set(agitator_speed);
 
         /* composition_keys, na ordem em que foram empurradas acima (8 cada):
-        [11..19) reactor.vapor, [19..27) separator.vapor, [27..35) separator.liquid,
-        [35..43) stripper.liquid — campo ".a" (primeiro de cada grupo) = 100% componente A, resto
-        0, só pra mw[7]/mw[9] não darem zero.
+        [10..18) reactor.vapor, [18..26) separator.vapor, [26..34) separator.liquid,
+        [34..42) stripper.liquid — campo ".a" (primeiro de cada grupo) = 100% componente A, resto
+        0, só pra mw[7] não dar zero.
         */
-        let composition_start = 11;
+        let composition_start = 10;
         offered[composition_start].set(1.0); // reactor.vapor_composition.a
         offered[composition_start + 8].set(1.0); // separator.vapor_composition.a
     }
@@ -325,6 +329,7 @@ mod tests {
             750.0, // reactor_pressure
             700.0, // separator_pressure
             1e-10, // ac_feed_flow (válvula fechada — mesmo epsilon nominal de Feed::ac_feed_flow)
+            0.0,   // underflow_flow (válvula fechada)
             50.0,  // agitator_speed
             50.0,  // stripper_steam_position
         );
@@ -350,7 +355,7 @@ mod tests {
     #[test]
     fn evaluate_does_not_panic_with_realistic_pressures() {
         let registry = StateRegistry::shared();
-        seed_registry(&mut registry.borrow_mut(), 2705.0, 2633.7, 1e-10, 22.1, 47.44);
+        seed_registry(&mut registry.borrow_mut(), 2705.0, 2633.7, 1e-10, 1332.5, 22.1, 47.44);
         let config = Snapshot::from_pairs(&[]);
         let flows = Flows::new(&mut registry.borrow_mut(), &config);
         registry.borrow_mut().resolve().expect("todo input deveria ter provedor");

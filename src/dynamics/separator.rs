@@ -1,13 +1,20 @@
 /* tep/dynamics/separator.rs */
 
-
 use crate::physics::constants::TepConstants;
-use monjolo::chemistry::{liquid_density, temperature_from_enthalpy};
+use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
 
 const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [m³] */
 const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
+const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0; /* VRNG (TEINIT) da válvula de underflow */
+/* Nominal — mesmo `s_zero` de TepDisturbanceState, canal 5 (TCWS, "condenser cooling water temp"). */
+const SEPARATOR_COOLING_WATER_RETURN: f64 = 40.0;
 
-#[monjolo::dynamic_model(after = ["Reactor"])]
+/** Terceira unidade migrada pro scheduler de dataflow topológico (issue 10), depois de Feed e
+Compressor. Absorve de `flows.rs`: Block 22/25 (slots 9/10, purge e underflow). De `heat.rs`:
+Block 33 (troca térmica do separador). De `derivatives.rs`: a seção "Separador" do balanço de
+massa/energia (Block 40, YP(10..18)). De `purge_analyzer.rs`: XMEAS 29-36 (Purge Gas Analysis).
+*/
+#[monjolo::dynamic_model(after = ["Reactor"], tasks)]
 pub struct Separator {
     /* Estado próprio (9 números) — mesmo split de Reactor, mesmo motivo (chave de config não
     uniforme entre vapor/líquido e entalpia).
@@ -27,43 +34,41 @@ pub struct Separator {
     #[offer(key = "separator.state.enthalpy")]
     enthalpy: f64,
 
-    #[need(key = "reactor.temperature")]
-    reactor_temperature: f64,
-
-    #[offer(key = "separator.temperature")]
-    temperature: f64,
-    #[offer(key = "separator.pressure")]
-    pressure: f64,
-    #[offer(key = "separator.liquid_volume")]
-    liquid_volume: f64,
-    #[offer(key = "separator.liquid_density")]
-    liquid_density: f64,
-    #[offer(key = "separator.total_vapor_kmol")]
-    total_vapor_kmol: f64,
-
-    #[offer(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    liquid_composition: [f64; 8],
-    #[offer(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    vapor_composition: [f64; 8],
-
     constants: TepConstants,
 }
 
+#[monjolo::tasks]
 impl Separator {
-    fn compute(&self) {
-        let reactor_temperature = self.reactor_temperature();
-
+    /* Bloco 1: balanço de energia próprio → temperatura/pressão/composição/volume/densidade —
+    igual ao `compute()` monolítico de antes, agora uma tarefa entre várias.
+    */
+    #[need(key = "reactor.temperature")]
+    #[offer(key = "separator.temperature")]
+    #[offer(key = "separator.pressure")]
+    #[offer(key = "separator.liquid_volume")]
+    #[offer(key = "separator.liquid_density")]
+    #[offer(key = "separator.total_vapor_kmol")]
+    #[offer(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[offer(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[allow(clippy::too_many_arguments)]
+    fn thermodynamics(&self, reactor_temperature: f64) -> (f64, f64, f64, f64, f64, [f64; 8], [f64; 8]) {
         let vapor_group = self.vapor();
         let liquid_group = self.liquid();
         let mut vapor_moles = [0.0f64; 8];
         let mut liquid_moles = [0.0f64; 8];
-        for i in 0..3 { vapor_moles[i] = vapor_group[i]; }
-        for i in 3..8 { liquid_moles[i] = liquid_group[i - 3]; }
+        for i in 0..3 {
+            vapor_moles[i] = vapor_group[i];
+        }
+        for i in 3..8 {
+            liquid_moles[i] = liquid_group[i - 3];
+        }
         let total_enthalpy = self.enthalpy();
 
         let total_liquid_moles: f64 = liquid_moles.iter().sum();
         let mut liquid_composition = [0.0f64; 8];
-        for i in 0..8 { liquid_composition[i] = liquid_moles[i] / total_liquid_moles; }
+        for i in 0..8 {
+            liquid_composition[i] = liquid_moles[i] / total_liquid_moles;
+        }
 
         let specific_enthalpy = total_enthalpy / total_liquid_moles;
         let temperature = temperature_from_enthalpy(&liquid_composition, reactor_temperature, specific_enthalpy, 0, &self.constants);
@@ -84,24 +89,119 @@ impl Separator {
         }
 
         let mut vapor_composition = [0.0f64; 8];
-        for i in 0..8 { vapor_composition[i] = partial_pressures[i] / pressure; }
+        for i in 0..8 {
+            vapor_composition[i] = partial_pressures[i] / pressure;
+        }
         let total_vapor_moles = pressure * volume_vapor / GAS_CONSTANT / temperature_k;
 
-        self.set_temperature(temperature);
-        self.set_pressure(pressure);
-        self.set_liquid_volume(volume_liquid);
-        self.set_liquid_density(density);
-        self.set_total_vapor_kmol(total_vapor_moles);
-        self.set_liquid_composition(liquid_composition);
-        self.set_vapor_composition(vapor_composition);
+        (temperature, pressure, volume_liquid, density, total_vapor_moles, liquid_composition, vapor_composition)
+    }
 
-        /* [DECISÃO DE MODELAGEM]: a derivada real do próprio estado (yp — quanto own_state muda por
-        tempo) não é calculada aqui. Quem calcula é `Flows`, uma DynamicModel separada que roda
-        depois deste na sequência (só ela tem os 4 subsistemas termodinâmicos ao mesmo tempo,
-        necessário pra saber o que entra/sai daqui) — `Flows::evaluate()` escreve direto nos slots
-        de derivada deste componente. Este `evaluate()` só produz valores termodinâmicos derivados
-        do estado atual (temperatura, pressão, composição etc.), nunca a derivada do estado em si.
+    /* Bloco 2 (ex-Flows, Block 22/25): purge (slot 9, dependente de pressão+composição próprias) e
+    underflow (slot 10, puramente linear na válvula — sem acoplamento nenhum, mas fica junto por
+    ser a outra saída direta do vaso).
+    */
+    #[need(key = "separator.pressure")]
+    #[need(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[need(key = "valve.purge.position")]
+    #[need(key = "valve.separator_underflow.position")]
+    #[offer(key = "flows.stream_flow.9")]
+    #[offer(key = "flows.stream_flow.10")]
+    fn outlet_flows(&self, separator_pressure: f64, separator_vapor: [f64; 8], purge_position: f64, underflow_position: f64) -> (f64, f64) {
+        let mol_weight = |z: &[f64; 8]| -> f64 { (0..8).map(|i| z[i] * self.constants.xmw[i]).sum() };
+        let purge_flow = purge_position * 0.151169 * (separator_pressure - 760.0).max(0.0).sqrt() / mol_weight(&separator_vapor);
+        let underflow_flow = underflow_position * SEPARATOR_UNDERFLOW_RANGE / 100.0;
+
+        (purge_flow, underflow_flow)
+    }
+
+    /* Bloco 3 (ex-Heat, Block 33): troca térmica no separador — UAS depende da vazão reator→
+    separador; a temperatura de referência é a do REATOR (não do separador — TST(8) aponta pro
+    reator no teprob.f, Block 20), preservado por fidelidade.
+    */
+    #[need(key = "reactor.temperature")]
+    #[need(key = "flows.stream_flow.7")]
+    #[offer(key = "heat.separator_heat")]
+    #[offer(key = "heat.separator_cooling_water_return")]
+    fn heat(&self, reactor_temperature: f64, reactor_to_separator_flow: f64) -> (f64, f64) {
+        let uas = 0.404655 * (1.0 - 1.0 / (1.0 + (reactor_to_separator_flow / 3528.73).powi(4)));
+        let separator_heat = uas * (SEPARATOR_COOLING_WATER_RETURN - reactor_temperature) * (1.0 - 0.25 * 0.0);
+
+        (separator_heat, SEPARATOR_COOLING_WATER_RETURN)
+    }
+
+    /* Bloco 4 (ex-Derivatives, Block 40 YP(10..18)): balanço de massa/energia do próprio estado.
+    `enthalpy_separator_liquid` é recomputada aqui (não lida de volta) — mesmo padrão já usado em
+    `derivatives.rs` pras entalpias de feed: quem precisa recalcula fresco a partir de composição+
+    temperatura já publicadas, em vez de depender de mais uma chave.
+    */
+    #[need(prefix = "reactor.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[need(key = "reactor.temperature")]
+    #[need(key = "flows.stream_flow.7")]
+    #[need(key = "flows.stream_flow.8")]
+    #[need(key = "flows.stream_flow.9")]
+    #[need(key = "flows.stream_flow.10")]
+    #[need(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[need(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[need(key = "separator.temperature")]
+    #[need(key = "flows.compressor_discharge_enthalpy")]
+    #[need(key = "heat.separator_heat")]
+    #[offer(prefix = "separator.state", components = ["vapor_a.derivative", "vapor_b.derivative", "vapor_c.derivative"])]
+    #[offer(prefix = "separator.state", components = ["liquid_d.derivative", "liquid_e.derivative", "liquid_f.derivative", "liquid_g.derivative", "liquid_h.derivative"])]
+    #[offer(key = "separator.state.enthalpy.derivative")]
+    #[allow(clippy::too_many_arguments)]
+    fn yp_derivative(
+        &self,
+        reactor_vapor: [f64; 8],
+        reactor_temperature: f64,
+        flow7: f64,
+        flow8: f64,
+        flow9: f64,
+        flow10: f64,
+        separator_vapor: [f64; 8],
+        separator_liquid: [f64; 8],
+        separator_temperature: f64,
+        compressor_discharge_enthalpy: f64,
+        separator_heat: f64,
+    ) -> ([f64; 3], [f64; 5], f64) {
+        let enthalpy_reactor_outlet = mixture_enthalpy(&reactor_vapor, reactor_temperature, 1, &self.constants);
+        /* SEM a correção de Block 24 (compressor) — é o que HST(10) preserva no original, por ter
+        sido copiado ANTES da correção rodar.
         */
+        let enthalpy_separator_vapor_uncorrected = mixture_enthalpy(&separator_vapor, separator_temperature, 1, &self.constants);
+        let enthalpy_separator_liquid = mixture_enthalpy(&separator_liquid, separator_temperature, 0, &self.constants);
+
+        let mut vapor_derivative = [0.0f64; 3];
+        let mut liquid_derivative = [0.0f64; 5];
+        for i in 0..8 {
+            let value = reactor_vapor[i] * flow7 - separator_vapor[i] * flow8 - separator_vapor[i] * flow9 - separator_liquid[i] * flow10;
+            if i < 3 {
+                vapor_derivative[i] = value;
+            } else {
+                liquid_derivative[i - 3] = value;
+            }
+        }
+        let enthalpy_derivative = enthalpy_reactor_outlet * flow7
+            - compressor_discharge_enthalpy * flow8
+            - enthalpy_separator_vapor_uncorrected * flow9
+            - enthalpy_separator_liquid * flow10
+            + separator_heat;
+
+        (vapor_derivative, liquid_derivative, enthalpy_derivative)
+    }
+
+    /* Bloco 5 (ex-purge_analyzer.rs): XMEAS 29-36, Purge Gas Analysis (Stream 9) — a mesma
+    composição de vapor que alimenta o recycle na stream 8 (Block 27 de teprob.f, `FCM(I,9)`/
+    `FCM(I,8)` usam o mesmo `XST(.,9)=XST(.,8)`), convertida de fração molar pra mol%.
+    */
+    #[need(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    #[offer(prefix = "xmeas.stream9.component", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    fn purge_analysis(&self, composition: [f64; 8]) -> [f64; 8] {
+        let mut mole_percent = [0.0f64; 8];
+        for i in 0..8 {
+            mole_percent[i] = composition[i] * 100.0;
+        }
+        mole_percent
     }
 }
 

@@ -183,6 +183,20 @@ impl Compressor {
 
         (compressor_vapor_derivative, compressor_enthalpy_derivative)
     }
+
+    /* Bloco 4 (ex-reactor_feed_analyzer.rs): XMEAS 23-28, Reactor Feed Analysis (Stream 6) — a
+    composição de vapor do próprio Compressor (stream 6 = cópia bit-a-bit do bypass, Block 31 de
+    teprob.f) convertida de fração molar pra mol% (teprob.f: "Units = Mole %").
+    */
+    #[need(prefix = "compressor.vapor_composition", components = ["0", "1", "2", "3", "4", "5"])]
+    #[offer(prefix = "xmeas.stream6.component", components = ["a", "b", "c", "d", "e", "f"])]
+    fn reactor_feed_analysis(&self, composition: [f64; 6]) -> [f64; 6] {
+        let mut mole_percent = [0.0f64; 6];
+        for i in 0..6 {
+            mole_percent[i] = composition[i] * 100.0;
+        }
+        mole_percent
+    }
 }
 
 #[cfg(test)]
