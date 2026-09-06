@@ -1,29 +1,15 @@
 /* tep/dynamics/derivatives.rs */
 
-/** Fecha o balanço de massa/energia (Block 40 de teprob.f) pros quatro acumuladores — as EDOs de
-verdade (yp), que `Reactor`/`Separator`/`Stripper`/`Compressor` deliberadamente NÃO calculam (ver
-comentário `[DECISÃO DE MODELAGEM]` em cada um deles): cada `#[state]` ali só declara QUE existe
-estado integrável, não QUEM calcula a derivada — e quem calcula é sempre quem tem o balanço de
-entrada/saída inteiro à mão ao mesmo tempo.
+/** Só sobra a seção "Reator" do Block 40 de teprob.f (YP(1..9)) — Separator/Stripper/Compressor já
+têm seu próprio `yp_derivative` (issue 10); esta é a última EDO ainda não migrada, aguardando o
+passo final (Reactor). `after = ["Heat"]` continua necessário: `heat.reactor_heat` só existe depois
+de `Heat::compute()` rodar.
 
-Por que este componente existe SEPARADO de `Flows`, e não dentro dele: a energia (Block 40, YP(9)/
-YP(18)/YP(27)) precisa de QUR/QUS/QUC — só `Heat` tem esses valores, e `Heat` roda DEPOIS de `Flows`
-na cadeia (`after = ["Flows"]`, porque `Heat` por sua vez precisa de `flows.agitation_factor`/
-`flows.stream_flow.7`/`flows.condenser_ua`). Colocar o balanço final dentro de `Flows` criaria um
-ciclo real (Flows precisaria de Heat, Heat precisa de Flows) — algo que a cadeia única desta fase
-não permite (ver `monjolo::component`, "Cadeia única, de propósito"). `Derivatives` resolve isso
-sendo o único elo que roda depois dos dois, `after = ["Heat"]`, o último da fase (A).
-
-Mapeamento de streams: os 13 slots (`flows.stream_flow.0`..`.12`) são exatamente `FTM(1)`..`FTM(13)`
-do original, na mesma ordem (slot N = FORTRAN stream N+1) — não há reordenação nenhuma, só o
-deslocamento de índice 1→0. `FCM(componente, stream)` do original — a vazão de UM componente numa
-stream — é sempre `composição[stream][componente] * stream_flow[stream]`, exceto pros slots 4
-(vapor do flash) e 11 (líquido do flash), cujas composições nunca são publicadas como fração (só a
-vazão por componente, `flows.flash_vapor_component_flow`/`flash_liquid_component_flow` — já é
-exatamente o FCM que a equação precisa, sem precisar normalizar e multiplicar de novo).
+Mapeamento de streams preservado de quando este componente cobria as 4 unidades: os slots
+(`flows.stream_flow.N`) são exatamente `FTM(N+1)` do original — sem reordenação, só o deslocamento
+de índice 1→0.
 */
 
-use crate::dynamics::feed::{FEED_AC_COMPOSITION, FEED_TEMPERATURE};
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::mixture_enthalpy;
 
@@ -38,38 +24,21 @@ pub struct Derivatives {
     #[need(key = "reactor.heat_of_reaction")]
     reactor_heat_of_reaction: f64,
 
-    /* separator.temperature/liquid_composition continuam precisos aqui — não pro balanço PRÓPRIO
-    do separador (que saiu pra `dynamics::separator::yp_derivative`, issue 10), e sim pro termo de
-    entalpia do UNDERFLOW que entra no Stripper (`enthalpy_separator_liquid`, recomputada fresca
-    abaixo). separator.vapor_composition não é mais precisa aqui — só entrava no balanço do
-    próprio separador.
-    */
-    #[need(key = "separator.temperature")]
-    separator_temperature: f64,
-    #[need(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    separator_liquid_composition: [f64; 8],
-
-    #[need(key = "stripper.temperature")]
-    stripper_temperature: f64,
-    #[need(prefix = "stripper.liquid_composition", components = ["0", "1", "2", "3", "4", "5", "6", "7"])]
-    stripper_liquid_composition: [f64; 8],
-
     #[need(key = "compressor.temperature")]
     compressor_temperature: f64,
     #[need(prefix = "compressor.vapor_composition", components = ["0", "1", "2", "3", "4", "5", "6", "7"])]
     compressor_vapor_composition: [f64; 8],
 
-    #[need(prefix = "flows.stream_flow", components = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"])]
-    stream_flows: [f64; 13],
-    #[need(prefix = "flows.flash_vapor_component_flow", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    flash_vapor_component_flow: [f64; 8],
-    #[need(prefix = "flows.flash_liquid_component_flow", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    flash_liquid_component_flow: [f64; 8],
+    /* Só os slots 6 (recycle do compressor→reator) e 7 (reator→separador) — os únicos que o
+    balanço do Reator consome.
+    */
+    #[need(key = "flows.stream_flow.6")]
+    compressor_recycle_flow: f64,
+    #[need(key = "flows.stream_flow.7")]
+    reactor_outlet_flow: f64,
 
     #[need(key = "heat.reactor_heat")]
     reactor_heat: f64,
-    #[need(key = "heat.condenser_heat")]
-    condenser_heat: f64,
 
     #[offer(prefix = "reactor.state", components = ["vapor_a.derivative", "vapor_b.derivative", "vapor_c.derivative"])]
     reactor_vapor_derivative: [f64; 3],
@@ -77,22 +46,6 @@ pub struct Derivatives {
     reactor_liquid_derivative: [f64; 5],
     #[offer(key = "reactor.state.enthalpy.derivative")]
     reactor_enthalpy_derivative: f64,
-
-    /* Separator tem seu próprio balanço agora — ver `dynamics::separator::yp_derivative` (issue
-    10). `flows.compressor_discharge_enthalpy`/`heat.separator_heat` deixaram de ser precisos
-    aqui — só entravam no balanço do PRÓPRIO separador.
-    */
-
-    #[offer(prefix = "stripper.state", components = ["0.derivative", "1.derivative", "2.derivative", "3.derivative", "4.derivative", "5.derivative", "6.derivative", "7.derivative"])]
-    stripper_liquid_derivative: [f64; 8],
-    #[offer(key = "stripper.state.8.derivative")]
-    stripper_enthalpy_derivative: f64,
-
-    /* Compressor tem seu próprio balanço agora — ver `dynamics::compressor::yp_derivative` (issue
-    10). `compressor.temperature`/`compressor.vapor_composition` continuam precisos aqui: entram
-    no termo de RECYCLE do Reator (`enthalpy_compressor_recycle`/`compressor_vapor[i] * flow[6]`),
-    não só no balanço do próprio compressor.
-    */
 }
 
 impl Derivatives {
@@ -101,79 +54,38 @@ impl Derivatives {
 
         let reactor_vapor = self.reactor_vapor_composition();
         let reactor_temperature = self.reactor_temperature();
-        let separator_liquid = self.separator_liquid_composition();
-        let separator_temperature = self.separator_temperature();
-        let stripper_liquid = self.stripper_liquid_composition();
-        let stripper_temperature = self.stripper_temperature();
         let compressor_vapor = self.compressor_vapor_composition();
         let compressor_temperature = self.compressor_temperature();
 
-        let flow = self.stream_flows();
-        let flash_vapor_flow = self.flash_vapor_component_flow(); /* FCM(·,5) — nosso slot 4 */
-        let flash_liquid_flow = self.flash_liquid_component_flow(); /* FCM(·,12) — nosso slot 11 */
+        let flow6 = self.compressor_recycle_flow();
+        let flow7 = self.reactor_outlet_flow();
 
-        /* Entalpias das streams — reconstruídas de composição+temperatura já publicadas (Blocks
-        20-21). Entalpias dos feeds D/E/A saíram junto com o balanço do compressor (ver
-        `dynamics::compressor::yp_derivative`) — só a do A&C fica, usada pelo Stripper abaixo.
+        /* slot 6 (recycle do compressor, cópia do slot 5) e slot 7 (saída pro separador) —
+        entalpias reconstruídas frescas de composição+temperatura já publicadas.
         */
-        let enthalpy_feed_ac = mixture_enthalpy(&FEED_AC_COMPOSITION, FEED_TEMPERATURE, 1, &constants);
-        /* slot 5 (recycle do compressor) e slot 6 (bypass, cópia de 5) — mesma entalpia. */
         let enthalpy_compressor_recycle = mixture_enthalpy(&compressor_vapor, compressor_temperature, 1, &constants);
         let enthalpy_reactor_outlet = mixture_enthalpy(&reactor_vapor, reactor_temperature, 1, &constants);
-        /* enthalpy_separator_liquid: entra no termo de UNDERFLOW que alimenta o Stripper abaixo
-        (não no balanço do próprio separador, que saiu pra `dynamics::separator::yp_derivative`).
-        */
-        let enthalpy_separator_liquid = mixture_enthalpy(&separator_liquid, separator_temperature, 0, &constants);
-        let enthalpy_stripper_liquid = mixture_enthalpy(&stripper_liquid, stripper_temperature, 0, &constants);
-
-        /* Composição do vapor do flash (slot 4) só existe normalizando FCM — ninguém publica a
-        fração em si, só a vazão por componente (que é o que as equações de massa já usam direto).
-        Não existe equivalente pro líquido do flash (slot 11): `HST(11)`/`XST(·,11)` são computados
-        no original (Block 29-30) mas NUNCA usados em Block 40 — quem entra na energia do stripper
-        é `HST(10)` (entalpia do underflow do separador, `enthalpy_separator_liquid`, já calculada
-        acima), não uma entalpia própria do líquido do flash.
-        */
-        let flash_vapor_total: f64 = flash_vapor_flow.iter().sum();
-        let mut flash_vapor_composition = [0.0f64; 8];
-        if flash_vapor_total > 0.0 {
-            for i in 0..8 {
-                flash_vapor_composition[i] = flash_vapor_flow[i] / flash_vapor_total;
-            }
-        }
-        let enthalpy_flash_vapor = mixture_enthalpy(&flash_vapor_composition, stripper_temperature, 1, &constants);
 
         /* ===== Reator — YP(1..8), YP(9): FCM(·,7) - FCM(·,8) + CRXR(·) ===== */
         let reaction_rates = self.reactor_reaction_rates();
         let mut reactor_vapor_derivative = [0.0f64; 3];
         let mut reactor_liquid_derivative = [0.0f64; 5];
         for i in 0..8 {
-            let value = compressor_vapor[i] * flow[6] - reactor_vapor[i] * flow[7] + reaction_rates[i];
+            let value = compressor_vapor[i] * flow6 - reactor_vapor[i] * flow7 + reaction_rates[i];
             if i < 3 {
                 reactor_vapor_derivative[i] = value;
             } else {
                 reactor_liquid_derivative[i - 3] = value;
             }
         }
-        let reactor_enthalpy_derivative = enthalpy_compressor_recycle * flow[6]
-            - enthalpy_reactor_outlet * flow[7]
+        let reactor_enthalpy_derivative = enthalpy_compressor_recycle * flow6
+            - enthalpy_reactor_outlet * flow7
             + self.reactor_heat_of_reaction()
             + self.reactor_heat();
-
-        /* ===== Stripper — YP(19..26), YP(27): FCM(·,12) - FCM(·,13) ===== */
-        let mut stripper_liquid_derivative = [0.0f64; 8];
-        for i in 0..8 {
-            stripper_liquid_derivative[i] = flash_liquid_flow[i] - stripper_liquid[i] * flow[12];
-        }
-        let stripper_enthalpy_derivative = enthalpy_feed_ac * flow[3] + enthalpy_separator_liquid * flow[10]
-            - enthalpy_flash_vapor * flow[4]
-            - enthalpy_stripper_liquid * flow[12]
-            + self.condenser_heat();
 
         self.set_reactor_vapor_derivative(reactor_vapor_derivative);
         self.set_reactor_liquid_derivative(reactor_liquid_derivative);
         self.set_reactor_enthalpy_derivative(reactor_enthalpy_derivative);
-        self.set_stripper_liquid_derivative(stripper_liquid_derivative);
-        self.set_stripper_enthalpy_derivative(stripper_enthalpy_derivative);
     }
 }
 
@@ -184,34 +96,18 @@ mod tests {
     use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::{Proxy, StateRegistry};
 
-    /* Handle por grupo de chave que `Derivatives` precisa (~86 `#[need]`s) — mesma ordem dos campos
-    do struct. Cada teste seta só o que importa; o resto fica em 0.0 (default do buffer), que é
-    seguro aqui porque `mixture_enthalpy` é soma ponderada pura (sem divisão) — composição/vazão
-    zeradas não geram NaN, só termos zerados.
-    */
     struct Seeded {
-        reactor_temperature: Proxy,
         reactor_vapor_composition: [Proxy; 8],
         reactor_reaction_rates: [Proxy; 8],
         reactor_heat_of_reaction: Proxy,
-        separator_temperature: Proxy,
-        separator_liquid_composition: [Proxy; 8],
-        stripper_temperature: Proxy,
-        stripper_liquid_composition: [Proxy; 8],
         compressor_temperature: Proxy,
         compressor_vapor_composition: [Proxy; 8],
-        stream_flow: [Proxy; 13],
-        flash_vapor_component_flow: [Proxy; 8],
-        flash_liquid_component_flow: [Proxy; 8],
+        compressor_recycle_flow: Proxy,
+        reactor_outlet_flow: Proxy,
         reactor_heat: Proxy,
-        condenser_heat: Proxy,
     }
 
     fn array8(offered: &[Proxy], start: usize) -> [Proxy; 8] {
-        std::array::from_fn(|i| offered[start + i].clone())
-    }
-
-    fn array13(offered: &[Proxy], start: usize) -> [Proxy; 13] {
         std::array::from_fn(|i| offered[start + i].clone())
     }
 
@@ -225,52 +121,31 @@ mod tests {
         let reactor_heat_of_reaction_idx = keys.len();
         keys.push("reactor.heat_of_reaction".to_string());
 
-        let separator_temperature_idx = keys.len();
-        keys.push("separator.temperature".to_string());
-        let separator_liquid_composition_start = keys.len();
-        for c in ["a", "b", "c", "d", "e", "f", "g", "h"] { keys.push(format!("separator.liquid_composition.{c}")); }
-
-        let stripper_temperature_idx = keys.len();
-        keys.push("stripper.temperature".to_string());
-        let stripper_liquid_composition_start = keys.len();
-        for c in ["0", "1", "2", "3", "4", "5", "6", "7"] { keys.push(format!("stripper.liquid_composition.{c}")); }
-
         let compressor_temperature_idx = keys.len();
         keys.push("compressor.temperature".to_string());
         let compressor_vapor_composition_start = keys.len();
         for c in ["0", "1", "2", "3", "4", "5", "6", "7"] { keys.push(format!("compressor.vapor_composition.{c}")); }
 
-        let stream_flow_start = keys.len();
-        for c in ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"] { keys.push(format!("flows.stream_flow.{c}")); }
-        let flash_vapor_component_flow_start = keys.len();
-        for c in ["a", "b", "c", "d", "e", "f", "g", "h"] { keys.push(format!("flows.flash_vapor_component_flow.{c}")); }
-        let flash_liquid_component_flow_start = keys.len();
-        for c in ["a", "b", "c", "d", "e", "f", "g", "h"] { keys.push(format!("flows.flash_liquid_component_flow.{c}")); }
+        let compressor_recycle_flow_idx = keys.len();
+        keys.push("flows.stream_flow.6".to_string());
+        let reactor_outlet_flow_idx = keys.len();
+        keys.push("flows.stream_flow.7".to_string());
 
         let reactor_heat_idx = keys.len();
         keys.push("heat.reactor_heat".to_string());
-        let condenser_heat_idx = keys.len();
-        keys.push("heat.condenser_heat".to_string());
 
         let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
         let (offered, _) = registry.subscribe(&key_refs, &[]);
 
         Seeded {
-            reactor_temperature: offered[0].clone(),
             reactor_vapor_composition: array8(&offered, reactor_vapor_composition_start),
             reactor_reaction_rates: array8(&offered, reactor_reaction_rates_start),
             reactor_heat_of_reaction: offered[reactor_heat_of_reaction_idx].clone(),
-            separator_temperature: offered[separator_temperature_idx].clone(),
-            separator_liquid_composition: array8(&offered, separator_liquid_composition_start),
-            stripper_temperature: offered[stripper_temperature_idx].clone(),
-            stripper_liquid_composition: array8(&offered, stripper_liquid_composition_start),
             compressor_temperature: offered[compressor_temperature_idx].clone(),
             compressor_vapor_composition: array8(&offered, compressor_vapor_composition_start),
-            stream_flow: array13(&offered, stream_flow_start),
-            flash_vapor_component_flow: array8(&offered, flash_vapor_component_flow_start),
-            flash_liquid_component_flow: array8(&offered, flash_liquid_component_flow_start),
+            compressor_recycle_flow: offered[compressor_recycle_flow_idx].clone(),
+            reactor_outlet_flow: offered[reactor_outlet_flow_idx].clone(),
             reactor_heat: offered[reactor_heat_idx].clone(),
-            condenser_heat: offered[condenser_heat_idx].clone(),
         }
     }
 
@@ -284,10 +159,10 @@ mod tests {
     fn reactor_mass_derivative_reflects_inflow_and_outflow_terms() {
         let registry = StateRegistry::shared();
         let seeded = seed_registry(&mut registry.borrow_mut());
-        seeded.compressor_vapor_composition[0].set(2.0); // componente a, entra via flow[6]
-        seeded.stream_flow[6].set(3.0);
-        seeded.reactor_vapor_composition[3].set(3.0); // componente d, sai via flow[7]
-        seeded.stream_flow[7].set(4.0);
+        seeded.compressor_vapor_composition[0].set(2.0); // componente a, entra via flow6
+        seeded.compressor_recycle_flow.set(3.0);
+        seeded.reactor_vapor_composition[3].set(3.0); // componente d, sai via flow7
+        seeded.reactor_outlet_flow.set(4.0);
 
         let config = Snapshot::from_pairs(&[]);
         let derivatives = Derivatives::new(&mut registry.borrow_mut(), &config);
@@ -299,15 +174,15 @@ mod tests {
             &mut registry.borrow_mut(),
             &["reactor.state.vapor_a.derivative", "reactor.state.liquid_d.derivative"],
         );
-        assert_eq!(out[0].get(), 2.0 * 3.0, "entrada: compressor_vapor[a]*flow[6], CRXR(a)=0");
-        assert_eq!(out[1].get(), -3.0 * 4.0, "saída: -reactor_vapor[d]*flow[7], CRXR(d)=0");
+        assert_eq!(out[0].get(), 2.0 * 3.0, "entrada: compressor_vapor[a]*flow6, CRXR(a)=0");
+        assert_eq!(out[1].get(), -3.0 * 4.0, "saída: -reactor_vapor[d]*flow7, CRXR(d)=0");
     }
 
     #[test]
     fn reactor_mass_derivative_includes_reaction_rate_term() {
         let registry = StateRegistry::shared();
         let seeded = seed_registry(&mut registry.borrow_mut());
-        // flow[6]/flow[7] ficam em 0.0 — isola CRXR puro
+        // flow6/flow7 ficam em 0.0 — isola CRXR puro
         seeded.reactor_reaction_rates[0].set(1.5);
         seeded.reactor_reaction_rates[3].set(-0.7);
 
@@ -329,7 +204,7 @@ mod tests {
     fn reactor_energy_derivative_isolates_heat_terms_when_flows_are_zero() {
         let registry = StateRegistry::shared();
         let seeded = seed_registry(&mut registry.borrow_mut());
-        // flow[6]/flow[7] ficam em 0.0 — zera os dois termos de entalpia*vazão
+        // flow6/flow7 ficam em 0.0 — zera os dois termos de entalpia*vazão
         seeded.reactor_heat_of_reaction.set(11.0);
         seeded.reactor_heat.set(5.0);
 
@@ -343,78 +218,21 @@ mod tests {
         assert_eq!(out[0].get(), 11.0 + 5.0);
     }
 
-    /* Balanço do Separator (antes testado aqui) saiu pra `dynamics::separator::yp_derivative`
-    (issue 10) — cobertura equivalente mora lá agora.
-    */
-
-    #[test]
-    fn stripper_mass_derivative_matches_hand_computed_values() {
-        let registry = StateRegistry::shared();
-        let seeded = seed_registry(&mut registry.borrow_mut());
-        seeded.flash_liquid_component_flow[0].set(6.0); // componente 0
-        seeded.stripper_liquid_composition[2].set(4.0); // componente 2
-        seeded.stream_flow[12].set(1.5);
-
-        let config = Snapshot::from_pairs(&[]);
-        let derivatives = Derivatives::new(&mut registry.borrow_mut(), &config);
-        registry.borrow_mut().resolve().expect("todo input deveria ter provedor");
-
-        derivatives.evaluate();
-
-        let out = read_back(
-            &mut registry.borrow_mut(),
-            &["stripper.state.0.derivative", "stripper.state.2.derivative"],
-        );
-        assert_eq!(out[0].get(), 6.0, "flash_liquid_flow[0] - stripper_liquid[0]*flow[12] (=0)");
-        assert_eq!(out[1].get(), -4.0 * 1.5, "flash_liquid_flow[2] (=0) - stripper_liquid[2]*flow[12]");
-    }
-
-    #[test]
-    fn stripper_energy_derivative_isolates_heat_term_when_flows_are_zero() {
-        let registry = StateRegistry::shared();
-        let seeded = seed_registry(&mut registry.borrow_mut());
-        // flow[3]/flow[4]/flow[10]/flow[12] ficam em 0.0 — zera os quatro termos de entalpia*vazão
-        seeded.condenser_heat.set(7.0);
-
-        let config = Snapshot::from_pairs(&[]);
-        let derivatives = Derivatives::new(&mut registry.borrow_mut(), &config);
-        registry.borrow_mut().resolve().expect("todo input deveria ter provedor");
-
-        derivatives.evaluate();
-
-        let out = read_back(&mut registry.borrow_mut(), &["stripper.state.8.derivative"]);
-        assert_eq!(out[0].get(), 7.0);
-    }
-
-    /* Balanço do Compressor (antes testado aqui) saiu pra `dynamics::compressor::yp_derivative`
-    (issue 10) — cobertura equivalente mora lá agora.
-    */
-
     #[test]
     fn evaluate_does_not_panic_with_realistic_operating_values() {
         let registry = StateRegistry::shared();
         let seeded = seed_registry(&mut registry.borrow_mut());
 
-        seeded.reactor_temperature.set(120.4);
         seeded.reactor_vapor_composition[0].set(1.0);
         for r in &seeded.reactor_reaction_rates { r.set(0.5); }
         seeded.reactor_heat_of_reaction.set(-200.0);
 
-        seeded.separator_temperature.set(80.1);
-        seeded.separator_liquid_composition[0].set(1.0);
-
-        seeded.stripper_temperature.set(65.7);
-        seeded.stripper_liquid_composition[0].set(1.0);
-
         seeded.compressor_temperature.set(95.3);
         seeded.compressor_vapor_composition[0].set(1.0);
-
-        for flow in &seeded.stream_flow { flow.set(20.0); }
-        seeded.flash_vapor_component_flow[0].set(15.0);
-        seeded.flash_liquid_component_flow[0].set(10.0);
+        seeded.compressor_recycle_flow.set(20.0);
+        seeded.reactor_outlet_flow.set(20.0);
 
         seeded.reactor_heat.set(100.0);
-        seeded.condenser_heat.set(30.0);
 
         let config = Snapshot::from_pairs(&[]);
         let derivatives = Derivatives::new(&mut registry.borrow_mut(), &config);
@@ -422,22 +240,18 @@ mod tests {
 
         derivatives.evaluate();
 
-        let mut keys: Vec<String> = vec![
-            "reactor.state.vapor_a.derivative".into(),
-            "reactor.state.vapor_b.derivative".into(),
-            "reactor.state.vapor_c.derivative".into(),
-            "reactor.state.liquid_d.derivative".into(),
-            "reactor.state.liquid_e.derivative".into(),
-            "reactor.state.liquid_f.derivative".into(),
-            "reactor.state.liquid_g.derivative".into(),
-            "reactor.state.liquid_h.derivative".into(),
-            "reactor.state.enthalpy.derivative".into(),
+        let keys = [
+            "reactor.state.vapor_a.derivative",
+            "reactor.state.vapor_b.derivative",
+            "reactor.state.vapor_c.derivative",
+            "reactor.state.liquid_d.derivative",
+            "reactor.state.liquid_e.derivative",
+            "reactor.state.liquid_f.derivative",
+            "reactor.state.liquid_g.derivative",
+            "reactor.state.liquid_h.derivative",
+            "reactor.state.enthalpy.derivative",
         ];
-        for c in ["0", "1", "2", "3", "4", "5", "6", "7"] { keys.push(format!("stripper.state.{c}.derivative")); }
-        keys.push("stripper.state.8.derivative".to_string());
-
-        let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-        let out = read_back(&mut registry.borrow_mut(), &key_refs);
+        let out = read_back(&mut registry.borrow_mut(), &keys);
         for proxy in &out {
             assert!(proxy.get().is_finite(), "derivada não pode ser NaN/Inf com valores realistas de operação");
         }
