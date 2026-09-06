@@ -219,6 +219,27 @@ impl Stripper {
         }
         mole_percent
     }
+
+    /* Bloco 7 (ex-measured.rs, Block 35): XMEAS 15 (Stripper Level), 17 (Stripper Underflow,
+    stream11), 18 (Stripper Temperature), 19 (Stripper Steam Flow) — conversões preservadas
+    exatamente do original. VTC = 156.5 (TEINIT) pro nível.
+    */
+    #[need(key = "stripper.liquid_volume")]
+    #[need(key = "flows.stream_flow.12")]
+    #[need(key = "stripper.liquid_density")]
+    #[need(key = "stripper.temperature")]
+    #[need(key = "heat.condenser_heat")]
+    #[offer(key = "xmeas.stripper.level")]
+    #[offer(key = "xmeas.stream11.flow_rate")]
+    #[offer(key = "xmeas.stripper.temperature")]
+    #[offer(key = "xmeas.stripper.steam_flow_rate")]
+    fn xmeas_conversions(&self, liquid_volume: f64, product_flow: f64, liquid_density: f64, temperature: f64, condenser_heat: f64) -> (f64, f64, f64, f64) {
+        let xmeas_level = (liquid_volume - 78.25) / 156.5 * 100.0;
+        let xmeas_underflow = product_flow / liquid_density / 35.3145;
+        let xmeas_steam_flow = condenser_heat * 1.04e3 * 0.454;
+
+        (xmeas_level, xmeas_underflow, temperature, xmeas_steam_flow)
+    }
 }
 
 #[cfg(test)]

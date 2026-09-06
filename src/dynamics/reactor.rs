@@ -240,6 +240,26 @@ impl Reactor {
 
         (vapor_derivative, liquid_derivative, enthalpy_derivative)
     }
+
+    /* Bloco 5 (ex-measured.rs, Block 35): XMEAS 7-9 (pressão/nível/temperatura do reator) + XMEAS
+    21 (temperatura de saída da água de resfriamento) — conversões preservadas exatamente do
+    original: (P-760)/760*101.325 (mmHg gauge → kPa gauge), volume/666.7*100 (calibração do
+    instrumento de nível).
+    */
+    #[need(key = "reactor.pressure")]
+    #[need(key = "reactor.liquid_volume")]
+    #[need(key = "reactor.temperature")]
+    #[need(key = "heat.reactor_cooling_water_return")]
+    #[offer(key = "xmeas.reactor.pressure")]
+    #[offer(key = "xmeas.reactor.level")]
+    #[offer(key = "xmeas.reactor.temperature")]
+    #[offer(key = "xmeas.reactor.cooling_water_outlet_temperature")]
+    fn xmeas_conversions(&self, pressure: f64, liquid_volume: f64, temperature: f64, cooling_water_return: f64) -> (f64, f64, f64, f64) {
+        let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
+        let xmeas_level = (liquid_volume - 84.6) / 666.7 * 100.0;
+
+        (xmeas_pressure, xmeas_level, temperature, cooling_water_return)
+    }
 }
 
 #[cfg(test)]

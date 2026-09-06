@@ -81,6 +81,38 @@ impl Feed {
     fn e_feed_mol_weight(&self) -> f64 {
         mol_weight(&FEED_E_COMPOSITION, &self.constants)
     }
+
+    /* Bloco (ex-measured.rs, Block 35): XMEAS 1-4 (A/D/E/A&C Feed) — conversões de unidade
+    preservadas exatamente do original: 0.359/35.3145 (kmol/h → kscmh, gás), XMW*0.454 (kmol/h →
+    kg/h, via peso molecular, pras 2 medidas por massa).
+    */
+    #[need(key = "flows.stream_flow.2")]
+    #[need(key = "flows.stream_flow.0")]
+    #[need(key = "flows.d_feed_mol_weight")]
+    #[need(key = "flows.stream_flow.1")]
+    #[need(key = "flows.e_feed_mol_weight")]
+    #[need(key = "flows.stream_flow.3")]
+    #[offer(key = "xmeas.stream1.flow_rate")]
+    #[offer(key = "xmeas.stream2.flow_rate")]
+    #[offer(key = "xmeas.stream3.flow_rate")]
+    #[offer(key = "xmeas.stream4.flow_rate")]
+    #[allow(clippy::too_many_arguments)]
+    fn xmeas_conversions(
+        &self,
+        a_feed_flow: f64,
+        d_feed_flow: f64,
+        d_feed_mol_weight: f64,
+        e_feed_flow: f64,
+        e_feed_mol_weight: f64,
+        ac_feed_flow: f64,
+    ) -> (f64, f64, f64, f64) {
+        let xmeas_a_feed = a_feed_flow * 0.359 / 35.3145;
+        let xmeas_d_feed = d_feed_flow * d_feed_mol_weight * 0.454;
+        let xmeas_e_feed = e_feed_flow * e_feed_mol_weight * 0.454;
+        let xmeas_ac_feed = ac_feed_flow * 0.359 / 35.3145;
+
+        (xmeas_a_feed, xmeas_d_feed, xmeas_e_feed, xmeas_ac_feed)
+    }
 }
 
 #[cfg(test)]

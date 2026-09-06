@@ -203,6 +203,42 @@ impl Separator {
         }
         mole_percent
     }
+
+    /* Bloco 6 (ex-measured.rs, Block 35): XMEAS 10 (Purge Rate, stream9), 11-13 (temperatura/
+    nível/pressão do separador), 14 (Separator Underflow, stream10), 22 (temperatura de saída da
+    água de resfriamento) — conversões preservadas exatamente do original.
+    */
+    #[need(key = "flows.stream_flow.9")]
+    #[need(key = "separator.temperature")]
+    #[need(key = "separator.liquid_volume")]
+    #[need(key = "separator.pressure")]
+    #[need(key = "flows.stream_flow.10")]
+    #[need(key = "separator.liquid_density")]
+    #[need(key = "heat.separator_cooling_water_return")]
+    #[offer(key = "xmeas.stream9.flow_rate")]
+    #[offer(key = "xmeas.separator.temperature")]
+    #[offer(key = "xmeas.separator.level")]
+    #[offer(key = "xmeas.separator.pressure")]
+    #[offer(key = "xmeas.stream10.flow_rate")]
+    #[offer(key = "xmeas.separator.cooling_water_outlet_temperature")]
+    #[allow(clippy::too_many_arguments)]
+    fn xmeas_conversions(
+        &self,
+        purge_flow: f64,
+        temperature: f64,
+        liquid_volume: f64,
+        pressure: f64,
+        underflow_flow: f64,
+        liquid_density: f64,
+        cooling_water_return: f64,
+    ) -> (f64, f64, f64, f64, f64, f64) {
+        let xmeas_purge_rate = purge_flow * 0.359 / 35.3145;
+        let xmeas_level = (liquid_volume - 27.5) / 290.0 * 100.0;
+        let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
+        let xmeas_underflow = underflow_flow / liquid_density / 35.3145;
+
+        (xmeas_purge_rate, temperature, xmeas_level, xmeas_pressure, xmeas_underflow, cooling_water_return)
+    }
 }
 
 #[cfg(test)]

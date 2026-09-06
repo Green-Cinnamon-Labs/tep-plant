@@ -4,15 +4,14 @@ Só o que é específico do TEP mora aqui. Framework de simulação genérico (D
 StateRegistry, Integrator, atuador/sensor de 1ª ordem, distúrbio cúbico, e agora também o carregador
 genérico de condição inicial — `monjolo::snapshot::Snapshot`) mora em monjolo (crate irmão).
 
-Organização de pastas: dynamics/ (os 7 blocos químicos — Reactor/Separator/Stripper/Compressor,
-acumuladores de massa e energia com EDO própria, mais Flows/Heat/Measured, álgebra transversal
-sobre os quatro, sem EDO própria — a divisão entre os dois grupos é lógica, dentro do mesmo
-arquivo `dynamics/mod.rs`, não uma hierarquia de pastas separada), actuators/ (os 12 atuadores
-físicos, um arquivo por atuador, todos `#[actuator(...)]`), sensors/ (idem, `#[sensor(...)]`),
-controllers/ (idem, `#[controller(...)]`), disturbance/ (Disturbance + seu estado interno),
-physics/ (constantes e correlações termodinâmicas compartilhadas — TepConstants, mixture_enthalpy
-etc., código reutilizável usado PELOS outros, não um componente descoberto em si). Todos os
-componentes de `dynamics/` são `#[dynamic_model]`, auto-descobertos via inventory.
+Organização de pastas: dynamics/ (os 5 blocos químicos — Feed/Reactor/Separator/Stripper/
+Compressor, cada um dono da própria física via `#[monjolo::tasks]`, issue 10 — nenhuma álgebra
+transversal sobra fora deles), diagnostics/ (agregações que cruzam MAIS DE UMA unidade e por isso
+não têm dono natural — hoje só `ShutdownDetector`), actuators/ (os 12 atuadores físicos, um arquivo
+por atuador, todos `#[actuator(...)]`), sensors/ (idem, `#[sensor(...)]`), controllers/ (idem,
+`#[controller(...)]`), disturbance/ (Disturbance + seu estado interno), physics/ (números do TEP
+compartilhados — `TepConstants` — as correlações em si moram em `monjolo::chemistry`). Todos os
+componentes de `dynamics/`/`diagnostics/` são `#[dynamic_model]`, auto-descobertos via inventory.
 
 NOTA (2026-08-13, branch feat/proc-macro-components): não existe mais `model.rs`/`build_tep()`.
 Todo componente da planta (os 7 blocos de dynamics/, os 12 atuadores, os 6 sensores, o controller)
@@ -30,6 +29,7 @@ chaves que interessam pra ele — do mesmo jeito que já faz com `StateRegistry`
 */
 pub mod actuators;
 pub mod controllers;
+pub mod diagnostics;
 pub mod disturbance;
 pub mod dynamics;
 pub mod physics;
@@ -45,8 +45,8 @@ mod tests {
     use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::StateRegistry;
 
-    /** Prova que a cadeia inteira funciona sem nenhuma lista manual: os 7 blocos de dynamics/, os
-    12 atuadores, os 6 sensores e o controller se descobrem sozinhos via inventory —
+    /** Prova que a cadeia inteira funciona sem nenhuma lista manual: as 5 unidades de dynamics/, o
+    diagnóstico de shutdown, os 12 atuadores, os 6 sensores e o controller se descobrem sozinhos via inventory —
     `attach_discovered_components` contra um `Composite` vazio (não sobra nenhum modelo manual pra
     ser o "primeiro filho", diferente de quando `build_tep()` existia) + `resolve()` (sem erro,
     nenhum `need` órfão) + `evaluate()` sem panic (nenhum Proxy lido antes de ser resolvido,

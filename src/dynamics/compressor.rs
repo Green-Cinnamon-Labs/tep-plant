@@ -197,6 +197,29 @@ impl Compressor {
         }
         mole_percent
     }
+
+    /* Bloco 5 (ex-measured.rs, Block 35): XMEAS 5 (Recycle Flow, stream8), 6 (Reactor Feed Rate,
+    stream6), 20 (Compressor Work) — todos vazões/potência do próprio Compressor. XMEAS 16
+    (Stripper Pressure) é a exceção conhecida do original: o nome sugere Stripper, mas o valor É a
+    pressão do Compressor (teprob.f, não é bug de digitação — preservado tal qual, mesma chave
+    externa `xmeas.stripper.pressure` de sempre).
+    */
+    #[need(key = "flows.stream_flow.8")]
+    #[need(key = "flows.stream_flow.5")]
+    #[need(key = "compressor.pressure")]
+    #[need(key = "flows.compressor_work")]
+    #[offer(key = "xmeas.stream8.flow_rate")]
+    #[offer(key = "xmeas.stream6.flow_rate")]
+    #[offer(key = "xmeas.stripper.pressure")]
+    #[offer(key = "xmeas.compressor.work")]
+    fn xmeas_conversions(&self, recycle_flow: f64, reactor_feed_flow: f64, pressure: f64, work: f64) -> (f64, f64, f64, f64) {
+        let xmeas_recycle_flow = recycle_flow * 0.359 / 35.3145;
+        let xmeas_reactor_feed_rate = reactor_feed_flow * 0.359 / 35.3145;
+        let xmeas_stripper_pressure = (pressure - 760.0) / 760.0 * 101.325;
+        let xmeas_compressor_work = work * 0.29307e3;
+
+        (xmeas_recycle_flow, xmeas_reactor_feed_rate, xmeas_stripper_pressure, xmeas_compressor_work)
+    }
 }
 
 #[cfg(test)]
