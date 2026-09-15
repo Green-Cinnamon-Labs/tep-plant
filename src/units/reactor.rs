@@ -9,8 +9,15 @@ const REACTION_ENTHALPIES: [f64; 2] = [0.06899381054, 0.05]; /* calor das reaç�
 const REACTION_FACTOR_1_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
 const REACTION_FACTOR_2_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
 const TEMPERATURE_SEED: f64 = 120.0; /* seed do Newton-Raphson — não afeta a raiz */
-/* Nominal — mesmo `s_zero` de TepDisturbanceState, canal 4 (TCWR, "reactor cooling water temp"). */
-const REACTOR_COOLING_WATER_RETURN: f64 = 35.0;
+
+/* Temperatura de ENTRADA da água de resfriamento do reator (TCWR) — nominal, mesmo `s_zero` de
+TepDisturbanceState, canal 4. IDV(4) perturbaria isso; ainda não conectado (issue #62), fica fixo.
+*/
+const REACTOR_COOLING_WATER_INLET: f64 = 35.0;
+const REACTOR_COOLING_WATER_RANGE: f64 = 1000.0; /* VRNG (TEINIT) da válvula de água de resfriamento */
+/* cpcw_eff (TEINIT) — calibrado no FORTRAN original pra dar twr≈94.6°C no ponto nominal (fcwr≈41.1,
+tcr=120, uar≈0.856). */
+const REACTOR_COOLING_WATER_CAPACITY: f64 = 0.00942;
 
 /** Quinta e última unidade migrada pro scheduler de dataflow topológico (issue 10) — fecha a
 migração. Absorve de `flows.rs`: Block 22 (AGSP/agitation_factor — fundido direto em `heat`, sem
@@ -47,6 +54,7 @@ pub struct Reactor {
 
 #[monjolo::tasks]
 impl Reactor {
+    
     /* Bloco 1: balanço de energia próprio → temperatura/pressão/composição/cinética — igual ao
     `compute()` monolítico de antes. Sem `#[need]` nenhum: só lê o próprio `#[state]`.
     */
@@ -169,17 +177,50 @@ impl Reactor {
     }
 
     /* Bloco 3 (ex-Heat, Block 32 + o AGSP de Block 22, que nunca teve dono além de ser consumido
-    aqui mesmo — mesmo tratamento do `condenser_ua` em `units::stripper`): troca térmica no
-    reator — UARLEV degrau/rampa/platô conforme o nível de líquido.
+    aqui mesmo — mesmo tratamento do `condenser_ua` em `units::stripper`): troca térmica entre o
+    reator e sua água de resfriamento — UARLEV degrau/rampa/platô conforme o nível de líquido
+    (fração da serpentina submersa, ver explicação abaixo) pondera tanto a temperatura de RETORNO
+    da água quanto o calor que sai do reator; as duas contas usam o mesmo `uar`, por isso vivem
+    juntas num método só, não separadas em dois `#[need]`/`#[offer]` cruzando o `StateRegistry`
+    pra compartilhar um número que não é grandeza própria de ninguém de fora.
+
+    DECISÃO DE MODELAGEM: a vazão de água é função EXCLUSIVA da abertura da válvula
+    (`valve.reactor_cooling_water.position`, XMV 10) — este modelo não representa rede de tubulação
+    nem queda de pressão na linha de resfriamento, mesma simplificação já usada em toda vazão
+    process-side (`Reactor::outlet_flow`, `Compressor::outlet_flows`: abertura de válvula ⇒ vazão,
+    ponto, sem física de tubulação intermediária). A partir dessa vazão, a temperatura de RETORNO
+    da água (`twr`) é a solução de um balanço de calor quase-estático entre a água (capacidade
+    térmica `fcwr * REACTOR_COOLING_WATER_CAPACITY`, entrando a `REACTOR_COOLING_WATER_INLET`) e o
+    reator (coeficiente de troca `uar`, a `reactor_temperature`) — média ponderada pelas duas
+    capacidades. Tradução direta do Block 32 do teprob.f original.
+
+    NOTA (2026-09-14): antes desta correção, este método usava uma constante fixa
+    (`REACTOR_COOLING_WATER_RETURN = 35.0`) no lugar de `twr` calculado — 35.0 é, na verdade,
+    `REACTOR_COOLING_WATER_INLET` (a água ENTRANDO, não saindo), então o reator resfriava ~3.3x
+    mais forte que o correto no nominal (força-motriz de 85 em vez de 25.4) e a válvula
+    (`valve.reactor_cooling_water.position`) ficava desconectada da física por completo — escrever
+    nela não tinha efeito nenhum. Consequência observada ao vivo: temperatura do reator estabilizava
+    perto de 35-38°C em vez de ~120°C; com a reação muito mais lenta nessa faixa, gás não-reagido
+    se acumulava até estourar o limite de pressão do ISD (3000 kPa).
     */
     #[need(key = "reactor.liquid_volume")]
     #[need(key = "reactor.temperature")]
     #[need(key = "agitator.speed")]
+    #[need(key = "valve.reactor_cooling_water.position")]
     #[offer(key = "heat.reactor_heat")]
     #[offer(key = "heat.reactor_cooling_water_return")]
-    fn heat(&self, reactor_liquid_volume: f64, reactor_temperature: f64, agitator_speed: f64) -> (f64, f64) {
+    fn heat(
+        &self,
+        reactor_liquid_volume: f64,
+        reactor_temperature: f64,
+        agitator_speed: f64,
+        cooling_water_position: f64,
+    ) -> (f64, f64) {
+        /* UARLEV: fração da serpentina submersa, 0 abaixo de level=10 (seca, sem troca), rampa
+        linear até level=50, platô em 1.0 dali pra cima (totalmente submersa — mais líquido não
+        aumenta mais nada).
+        */
         let agitation_factor = (agitator_speed + 150.0) / 100.0;
-
         let level = reactor_liquid_volume / 7.8; /* 7.8 = fator de conversão de volume pra "nível" deste bloco */
         let uar_level = if level > 50.0 {
             1.0
@@ -189,9 +230,29 @@ impl Reactor {
             0.025 * level - 0.25
         };
         let uar = uar_level * (-0.5 * agitation_factor * agitation_factor + 2.75 * agitation_factor - 2.5) * 855490e-6;
-        let reactor_heat = uar * (REACTOR_COOLING_WATER_RETURN - reactor_temperature) * (1.0 - 0.35 * 0.0);
 
-        (reactor_heat, REACTOR_COOLING_WATER_RETURN)
+        /* fcwr: vazão da água, só função da válvula (decisão de modelagem acima) — escala
+        `posição * VRNG * 0.001`, não `posição * VRNG / 100` como as outras válvulas: é assim que o
+        Block 32 original define fcwr, calibrado junto com REACTOR_COOLING_WATER_CAPACITY.
+        */
+        let fcwr = cooling_water_position * REACTOR_COOLING_WATER_RANGE * 0.001;
+        let cw_capacity = fcwr * REACTOR_COOLING_WATER_CAPACITY;
+        let total_capacity = cw_capacity + uar;
+
+        /* Guarda contra 0/0: só degenera quando fcwr E uar são ambos ~0 (válvula fechada com
+        nível fora da faixa de agitação eficaz) — nesse caso `uar=0` já zera reactor_heat de
+        qualquer forma, então cair em reactor_temperature (força-motriz zero) é seguro, só evita
+        NaN se propagando pro resto da simulação (uar * NaN não seria zero).
+        */
+        let twr = if total_capacity > 1e-12 {
+            (cw_capacity * REACTOR_COOLING_WATER_INLET + uar * reactor_temperature) / total_capacity
+        } else {
+            reactor_temperature
+        };
+
+        let reactor_heat = uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0); /* disturbance channel 9 (IDV 10), neutro */
+
+        (reactor_heat, twr)
     }
 
     /* Bloco 4 (ex-Derivatives, Block 40 YP(1..9)): balanço de massa/energia do próprio estado —
