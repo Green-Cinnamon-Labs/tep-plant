@@ -10,10 +10,24 @@ const REACTION_FACTOR_1_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Dist
 const REACTION_FACTOR_2_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
 const TEMPERATURE_SEED: f64 = 120.0; /* seed do Newton-Raphson — não afeta a raiz */
 
-/* Temperatura de ENTRADA da água de resfriamento do reator (TCWR) — nominal, mesmo `s_zero` de
-TepDisturbanceState, canal 4. IDV(4) perturbaria isso; ainda não conectado (issue #62), fica fixo.
+/* Temperatura de ENTRADA da água de resfriamento do reator (TCWR) — nominal. IDV(4)/IDV(11)
+perturbariam isso; ainda não conectado (issue #62), fica fixo.
+
+NOTA (2026-09-15, Exp 23): valor corrigido de 35.0 para 38.5. O comentário original do Block 32 em
+`v1.0.0` já dizia "cpcw_eff calibrated to yield twr≈94.6°C at nominal (tcwr=38.5, ...)" — mas o
+código então em uso aqui copiava, por engano, o `s_zero` do canal 4 de `TepDisturbanceState`
+(35.0), que é uma constante DIFERENTE (a condição INICIAL do canal de distúrbio, não o valor
+nominal usado na calibração de `cpcw_eff` documentada no próprio Block 32). Confirmado
+empiricamente: alimentando `heat_exchange()` com o estado exato de
+`docs/simulations/simulation_log_13.csv` (200 ticks da trajetória validada), o `twr` implícito
+necessário pra bater com `XMEAS(21)` tinha média 37.98°C (variação 37.4–38.7, plausível dado
+pequenos erros de arredondamento acumulados em `temperature`/`volume_liquid`) — direto na faixa do
+38.5 documentado, nunca perto de 35.0. Com 35.0, `twr` saía sistematicamente ~0.8–1.06°C ABAIXO do
+valor real em todos os 200 ticks testados (muito acima do ruído de medição de XMEAS(21), σ=0.01) —
+um viés pequeno mas constante que alimenta `reactor_heat` (Block 32) todo tick, exatamente o tipo de
+erro sistemático que a Exp 21 já tinha caracterizado (divergência suave, não um salto).
 */
-const REACTOR_COOLING_WATER_INLET: f64 = 35.0;
+const REACTOR_COOLING_WATER_INLET: f64 = 38.5;
 const REACTOR_COOLING_WATER_RANGE: f64 = 1000.0; /* VRNG (TEINIT) da válvula de água de resfriamento */
 /* cpcw_eff (TEINIT) — calibrado no FORTRAN original pra dar twr≈94.6°C no ponto nominal (fcwr≈41.1,
 tcr=120, uar≈0.856). */
@@ -489,5 +503,88 @@ mod tests {
         assert_eq!(vapor_derivative, [reaction_rates[0], reaction_rates[1], reaction_rates[2]]);
         assert_eq!(liquid_derivative, [reaction_rates[3], reaction_rates[4], reaction_rates[5], reaction_rates[6], reaction_rates[7]]);
         assert_eq!(enthalpy_derivative, heat_of_reaction + reactor_heat);
+    }
+
+    /** Experimento 23 (spec-tennessee-eastman/experimentos.md). O Exp 19 provou que `physical_state()`
+    reproduz o nominal — mas um ÚNICO ponto não pega um bug que só aparece fora dele. Este teste é
+    bem mais rigoroso: para cada um dos primeiros 200 ticks de
+    `docs/simulations/simulation_log_13.csv` (a trajetória REAL, validada, do Exp 13), alimenta
+    `physical_state()`/`heat_exchange()` com o estado EXATO (`YY[0..8]`, `XMV(10)`, `XMV(12)`) que a
+    planta validada tinha naquele instante — e compara a saída contra o `XMEAS(7)`/`XMEAS(9)`/
+    `XMEAS(21)` que a MESMA planta validada mediu no MESMO instante. Se a fórmula estiver certa, dar
+    o estado certo tem que produzir a medida certa em QUALQUER ponto da trajetória, não só no
+    nominal — isso isola `Reactor` por completo do resto da planta (nenhum `#[need]` externo entra
+    aqui, só o próprio estado + duas posições de válvula), então qualquer divergência encontrada
+    aqui é, por eliminação, um bug de fórmula dentro do próprio `Reactor`, não de acoplamento.
+    */
+    #[test]
+    fn physical_state_and_heat_exchange_match_the_validated_csv_at_many_points_along_the_real_trajectory() {
+        let csv = std::fs::read_to_string("docs/simulations/simulation_log_13.csv")
+            .expect("docs/simulations/simulation_log_13.csv deveria existir (cópia do Exp 13)");
+
+        let mut max_temperature_diff = 0.0f64;
+        let mut max_pressure_diff = 0.0f64;
+        let mut max_twr_diff = 0.0f64;
+
+        for (row_index, line) in csv.lines().skip(1).take(200).enumerate() {
+            let fields: Vec<f64> = line.split(',').map(|f| f.parse().expect("campo deveria ser numerico")).collect();
+            let xmeas7 = fields[7];
+            let xmeas9 = fields[9];
+            let xmeas21 = fields[21];
+            let xmv10 = fields[32];
+            let xmv12 = fields[34];
+            let yy = &fields[36..45]; /* YY[0..8]: reactor A,B,C,D,E,F,G,H,energy */
+
+            let registry = StateRegistry::shared();
+            let initial = Snapshot::from_pairs(&[
+                ("state.reactor_vapor.A", yy[0]),
+                ("state.reactor_vapor.B", yy[1]),
+                ("state.reactor_vapor.C", yy[2]),
+                ("state.reactor_vapor.D", yy[3]),
+                ("state.reactor_vapor.E", yy[4]),
+                ("state.reactor_vapor.F", yy[5]),
+                ("state.reactor_vapor.G", yy[6]),
+                ("state.reactor_vapor.H", yy[7]),
+                ("state.reactor.energy", yy[8]),
+            ]);
+            let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
+
+            let (temperature, _temperature_k, pressure, volume_liquid, _density, _volume_vapor, _total_vapor_moles, _heat_of_reaction, _liquid_composition, _vapor_composition, _vapor_moles, _reaction_rates) =
+                reactor.__physical_state_impl();
+            let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
+            let (_reactor_heat, twr) = reactor.__heat_exchange_impl(volume_liquid, temperature, xmv12, xmv10);
+
+            let temperature_diff = (temperature - xmeas9).abs();
+            let pressure_diff = (xmeas_pressure - xmeas7).abs();
+            let twr_diff = (twr - xmeas21).abs();
+
+            max_temperature_diff = max_temperature_diff.max(temperature_diff);
+            max_pressure_diff = max_pressure_diff.max(pressure_diff);
+            max_twr_diff = max_twr_diff.max(twr_diff);
+
+            if row_index < 20 || row_index % 20 == 0 {
+                println!(
+                    "tick={row_index:4} T calc={temperature:9.4} ref={xmeas9:9.4} \u{394}T={temperature_diff:8.5} | \
+                    P calc={xmeas_pressure:9.4} ref={xmeas7:9.4} \u{394}P={pressure_diff:8.5} | \
+                    twr calc={twr:9.4} ref={xmeas21:9.4} \u{394}twr={twr_diff:8.5}"
+                );
+            }
+        }
+
+        println!(
+            "\nmax |\u{394}| em 200 ticks: temperatura={max_temperature_diff:.6}\u{b0}C pressao={max_pressure_diff:.6}kPa twr={max_twr_diff:.6}\u{b0}C"
+        );
+
+        /* Limiares folgados o bastante pra passar com o ruído de medição do CSV (XMEAS(9) σ=0.01,
+        XMEAS(7) σ=0.3, XMEAS(21) σ=0.01 — Block 37/XNS de `v1.0.0`) mais o efeito não-linear de
+        pequenos erros de entrada se propagando por `uar`/`liquid_density`, mas MUITO abaixo do viés
+        de ~1°C/~0.9kPa que caracterizava o bug real (Exp 23: `REACTOR_COOLING_WATER_INLET` errado).
+        */
+        assert!(
+            max_temperature_diff < 0.05 && max_pressure_diff < 1.0 && max_twr_diff < 0.5,
+            "physical_state()/heat_exchange() nao reproduzem a trajetoria validada dado o MESMO \
+            estado de entrada - a formula diverge da fisica correta mesmo fora do ponto nominal \
+            (max dT={max_temperature_diff}, max dP={max_pressure_diff}, max dtwr={max_twr_diff})"
+        );
     }
 }
