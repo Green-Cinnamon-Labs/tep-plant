@@ -65,6 +65,86 @@ mod tests {
         root.evaluate();
     }
 
+    /** Investigação nova (continuação do Exp 22, spec-tennessee-eastman/experimentos.md): confirmado
+    em `monjolo` que `Sensor::read()` ANTES de qualquer `commit()` já ter acontecido devolve `0.0`
+    silenciosamente (não panica) — e `commit()` só roda UMA vez por tick, DEPOIS de todos os 4
+    sub-passos do RK4 + a avaliação de consolidação. Como Controllers rodam em TODA chamada de
+    `evaluate()` (inclusive a primeiríssima do processo inteiro, antes de qualquer `commit()`),
+    a hipótese é: no primeiríssimo tick, os 3 controladores leem pressão/nível como 0.0 em vez do
+    valor real semeado, calculam um comando errado (as 3 válvulas fecham pra 0%, já que
+    `clamp(bias + kp*(0 - setpoint), 0, 100)` satura no piso pra todo setpoint positivo razoável),
+    e isso desloca a posição real da válvula um pouco na direção errada antes do controle se
+    corrigir no tick 2 em diante — um viés de UMA vez, no primeiríssimo tick, que poderia ser
+    exatamente a semente do desvio suave visto desde `t_h=0` na Exp 21.
+    */
+    #[test]
+    fn first_tick_control_command_uses_precommit_zero_sensor_reading() {
+        use monjolo::numerical_method::integrator::Integrator;
+        use monjolo::numerical_method::rk4::RK4;
+        use monjolo::state_registry::Proxy;
+
+        let registry = StateRegistry::shared();
+        let config = Snapshot::from_file("application.toml")
+            .expect("application.toml deveria existir na raiz do crate e ser um TOML válido");
+        let mut root = Composite::new();
+        monjolo::attach_discovered_components(&mut root, &mut registry.borrow_mut(), &config);
+
+        let state_keys = root.state_keys();
+        let mut integration_needs: Vec<String> = Vec::with_capacity(state_keys.len() * 2);
+        for key in &state_keys {
+            integration_needs.push(key.clone());
+            integration_needs.push(format!("{key}.derivative"));
+        }
+        let integration_need_refs: Vec<&str> = integration_needs.iter().map(String::as_str).collect();
+        let (_, integration_proxies) = registry.borrow_mut().subscribe(&[], &integration_need_refs);
+
+        let (_, watch_proxies) = registry.borrow_mut().subscribe(&[], &["valve.purge.position"]);
+
+        registry.borrow_mut().resolve().expect("todo `need` deveria ter provedor");
+
+        let mut state_proxies: Vec<Proxy> = Vec::with_capacity(state_keys.len());
+        let mut derivative_proxies: Vec<Proxy> = Vec::with_capacity(state_keys.len());
+        for pair in integration_proxies.chunks(2) {
+            state_proxies.push(pair[0].clone());
+            derivative_proxies.push(pair[1].clone());
+        }
+
+        let seeded_purge_position = watch_proxies[0].get();
+        println!("valve.purge.position ANTES de qualquer evaluate(): {seeded_purge_position}");
+
+        // Priming (fix de monjolo/simulation.rs replicado aqui — este harness não chama
+        // Simulation::spawn_plant_thread de verdade, então precisa da mesma correção pra provar
+        // que a LÓGICA do fix funciona antes de confiar no caminho de produção separadamente.
+        root.evaluate();
+        registry.borrow_mut().commit();
+        root.evaluate();
+
+        let integrator = RK4;
+        let dt_hours = 1.0 / 3600.0;
+
+        // Exatamente 1 tick — o mesmo que Simulation::spawn_plant_thread roda.
+        let current: Vec<f64> = state_proxies.iter().map(Proxy::get).collect();
+        let next = integrator.step(&current, dt_hours, &mut |perturbed: &[f64]| {
+            for (proxy, &value) in state_proxies.iter().zip(perturbed) {
+                proxy.set(value);
+            }
+            root.evaluate();
+            derivative_proxies.iter().map(Proxy::get).collect()
+        });
+        for (proxy, &value) in state_proxies.iter().zip(&next) {
+            proxy.set(value);
+        }
+        root.evaluate();
+        registry.borrow_mut().commit();
+
+        let purge_after_first_tick = watch_proxies[0].get();
+        println!("valve.purge.position DEPOIS do 1º tick (1º commit() já rodou): {purge_after_first_tick}");
+        println!(
+            "deslocamento: {} (nominal esperado do controlador em regime: ~40%, seed era {seeded_purge_position})",
+            purge_after_first_tick - seeded_purge_position
+        );
+    }
+
     /** Investigação do Experimento 21 (spec-tennessee-eastman/experimentos.md). Os Exp 19/20 já
     provaram que `Reactor`/`Separator`/`Compressor` calculam sua PRÓPRIA física corretamente,
     isoladamente, com entradas conhecidas — mas o processo real ainda diverge (Exp 18). Esse teste
@@ -304,6 +384,49 @@ mod tests {
         assert!(
             first_divergence.is_none(),
             "divergiu da trajetória validada — ver PRIMEIRA DIVERGÊNCIA acima (rode com --nocapture)"
+        );
+    }
+
+    /** Experimento 22 (spec-tennessee-eastman/experimentos.md) / issue
+    spec-tennessee-eastman#71 — usa `monjolo::phase_a_execution_order()` (novo, escrito pra esta
+    investigação) pra checar diretamente a hipótese: existe alguma tarefa que `#[need]` uma chave
+    ANTES de quem `#[offer]` essa chave ter rodado, na mesma chamada de `evaluate()`? Se sim, é
+    exatamente o tipo de leitura "atrasada" de `EvaluationState` que explicaria o viés sistemático
+    visto desde o tick 0 no Exp 21.
+    */
+    #[test]
+    fn phase_a_execution_order_never_reads_a_key_before_whoever_offers_it() {
+        let order = monjolo::phase_a_execution_order();
+        assert!(!order.is_empty(), "deveria ter descoberto os componentes reais de tep-plant");
+
+        let mut offered_at: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+        for (position, descriptor) in order.iter().enumerate() {
+            for &key in descriptor.offers {
+                offered_at.insert(key, position);
+            }
+        }
+
+        let mut violations = Vec::new();
+        for (position, descriptor) in order.iter().enumerate() {
+            for &key in descriptor.needs {
+                if let Some(&offered_position) = offered_at.get(key) {
+                    if offered_position >= position {
+                        violations.push(format!(
+                            "'{}' (posição {position}) precisa de '{key}', mas quem oferece \
+                            ('{}') só roda na posição {offered_position} — leria um valor \
+                            atrasado de EvaluationState",
+                            descriptor.name, order[offered_position].name,
+                        ));
+                    }
+                }
+            }
+        }
+
+        assert!(
+            violations.is_empty(),
+            "ordem de execução da fase (A) tem {} violação(ões):\n{}",
+            violations.len(),
+            violations.join("\n"),
         );
     }
 }

@@ -66,6 +66,10 @@ analysis/tep_analysis/.ipynb_checkpoints/
 # Simulation artifacts
 tennessee-eastman-service/simulation_log.csv
 
+# Artefato gerado por monjolo::runtime::bootstrap() a cada build/execucao
+# (Exp 22, spec-tennessee-eastman#71) - nao e codigo-fonte
+execution_order.txt
+
 # OPC-UA runtime (gerado por src/bin/tep_plant.rs ao rodar — certificados/
 # chaves, nunca deveriam ser versionados)
 pki/
