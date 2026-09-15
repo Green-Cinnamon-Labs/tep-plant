@@ -56,7 +56,7 @@ pub struct Reactor {
 impl Reactor {
     
     /* Bloco 1: balanço de energia próprio → temperatura/pressão/composição/cinética — igual ao
-    `compute()` monolítico de antes. Sem `#[need]` nenhum: só lê o próprio `#[state]`.
+        `compute()` monolítico de antes. Sem `#[need]` nenhum: só lê o próprio `#[state]`.
     */
     #[offer(key = "reactor.temperature")]
     #[offer(key = "reactor.temperature_k")]
@@ -72,6 +72,7 @@ impl Reactor {
     #[offer(prefix = "reactor.reaction_rates", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[allow(clippy::type_complexity)]
     fn physical_state(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, [f64; 8], [f64; 8], [f64; 8], [f64; 8]) {
+        
         let vapor_group = self.vapor();
         let liquid_group = self.liquid();
 
@@ -361,5 +362,132 @@ mod tests {
         assert_eq!(reactor.vapor(), [0.0; 3]);
         assert_eq!(reactor.liquid(), [0.0; 5]);
         assert_eq!(reactor.enthalpy(), 0.0);
+    }
+
+    /* Investigação do Experimento 18 (spec-tennessee-eastman/experimentos.md): a planta colapsa
+    (reactor.temperature cai de ~120°C pra ~40-60°C, reactor.pressure estoura o ISD) mesmo depois
+    das duas correções de água de resfriamento. Este teste isola `physical_state()` do resto da
+    simulação — semeia exatamente os valores de `application.toml` (o mesmo estado inicial validado
+    nos Exp 3/10/11/13) e verifica se o cálculo de flash+cinética, sozinho, já reproduz o ponto
+    nominal documentado. Se isto falhar, o bug está aqui, não em várias horas de integração RK4
+    acumulando erro.
+    */
+    #[test]
+    fn physical_state_matches_nominal_operating_point_from_application_toml() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[
+            ("state.reactor_vapor.A", 10.679592788064898),
+            ("state.reactor_vapor.B", 4.666690921054032),
+            ("state.reactor_vapor.C", 7.668821577187304),
+            ("state.reactor_vapor.D", 0.3968744850195289),
+            ("state.reactor_vapor.E", 22.74175383132296),
+            ("state.reactor_vapor.F", 2.9441162740614635),
+            ("state.reactor_vapor.G", 148.4668245572372),
+            ("state.reactor_vapor.H", 153.02693445529974),
+            ("state.reactor.energy", 2.6983891373872186),
+        ]);
+
+        let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
+        let (temperature, _temperature_k, pressure, _volume_liquid, _density, _volume_vapor, _total_vapor_moles, heat_of_reaction, _liquid_composition, _vapor_composition, _vapor_moles, reaction_rates) =
+            reactor.__physical_state_impl();
+
+        /* Nominal documentado (Exp 3/10/11/13, te_exp3_snapshot.toml): ~120°C, XMEAS(7) ~2695-2705
+        kPa. Faixas com folga generosa — o objetivo é pegar um colapso grosseiro (dezenas de graus/
+        milhares de kPa fora), não validar casas decimais.
+        */
+        assert!(
+            (110.0..130.0).contains(&temperature),
+            "esperava temperatura perto do nominal ~120°C, obteve {temperature}°C — flash/cinética \
+            já diverge na primeira chamada, sem nenhuma integração RK4 envolvida"
+        );
+
+        let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
+        assert!(
+            (2500.0..2900.0).contains(&xmeas_pressure),
+            "esperava XMEAS(7) perto do nominal ~2700 kPa, obteve {xmeas_pressure} kPa (pressão \
+            bruta = {pressure} mmHg)"
+        );
+
+        /* Exotérmica: heat_of_reaction > 0 confirma que a reação está de fato avançando (rr[0]/
+        rr[1] > 0) — se as taxas tivessem colapsado pra perto de zero, isso apareceria aqui como um
+        heat_of_reaction quase nulo, incapaz de compensar qualquer resfriamento.
+        */
+        assert!(
+            heat_of_reaction > 0.0,
+            "esperava heat_of_reaction > 0 (reação exotérmica avançando), obteve {heat_of_reaction}"
+        );
+
+        /* reaction_rates[0] é o consumo líquido de A (sempre ≤ 0 pela estequiometria) — perto de
+        zero indicaria reação estagnada.
+        */
+        assert!(
+            reaction_rates[0] < -1.0,
+            "esperava consumo líquido de A claramente negativo, obteve {}",
+            reaction_rates[0]
+        );
+    }
+
+    /* `mass_and_energy_balance` consome os outputs de `physical_state`/`heat_exchange`/fluxos de
+    outras unidades — testado aqui com entradas balanceadas (mesma composição/temperatura/vazão
+    entrando e saindo) pra confirmar que os termos de fluxo se cancelam exatamente, sobrando só
+    reação/calor. Não depende de nenhum valor "nominal" hipotético — é uma verificação estrutural
+    da equação de balanço, útil mesmo sem saber o ponto de operação de cor.
+    */
+    #[test]
+    fn mass_and_energy_balance_cancels_flow_terms_when_inflow_equals_outflow() {
+        let registry = StateRegistry::shared();
+        let reactor = Reactor::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let temperature = 120.0;
+        let flow = 500.0;
+
+        let (vapor_derivative, liquid_derivative, enthalpy_derivative) = reactor.__mass_and_energy_balance_impl(
+            composition,
+            temperature,
+            flow,
+            flow,
+            composition,
+            temperature,
+            [0.0; 8],
+            0.0,
+            0.0,
+        );
+
+        assert_eq!(vapor_derivative, [0.0; 3], "mesma composição/vazão entrando e saindo não deveria acumular nada");
+        assert_eq!(liquid_derivative, [0.0; 5], "mesma composição/vazão entrando e saindo não deveria acumular nada");
+        assert_eq!(enthalpy_derivative, 0.0, "mesma composição/temperatura/vazão não deveria gerar entalpia líquida");
+    }
+
+    #[test]
+    fn mass_and_energy_balance_passes_through_reaction_and_heat_when_flows_are_balanced() {
+        let registry = StateRegistry::shared();
+        let reactor = Reactor::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let temperature = 120.0;
+        let flow = 500.0;
+        let reaction_rates = [-3.0, 0.0, -2.0, -1.5, -1.0, 1.5, 2.0, 1.0];
+        let heat_of_reaction = 10.0;
+        let reactor_heat = -4.0;
+
+        let (vapor_derivative, liquid_derivative, enthalpy_derivative) = reactor.__mass_and_energy_balance_impl(
+            composition,
+            temperature,
+            flow,
+            flow,
+            composition,
+            temperature,
+            reaction_rates,
+            heat_of_reaction,
+            reactor_heat,
+        );
+
+        /* Com os fluxos cancelados, a derivada de cada componente É a taxa de reação — sem
+        surpresa de índice trocado entre vapor_derivative (0..3) e liquid_derivative (3..8).
+        */
+        assert_eq!(vapor_derivative, [reaction_rates[0], reaction_rates[1], reaction_rates[2]]);
+        assert_eq!(liquid_derivative, [reaction_rates[3], reaction_rates[4], reaction_rates[5], reaction_rates[6], reaction_rates[7]]);
+        assert_eq!(enthalpy_derivative, heat_of_reaction + reactor_heat);
     }
 }
