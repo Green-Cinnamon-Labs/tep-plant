@@ -71,7 +71,7 @@ impl Reactor {
     #[offer(prefix = "reactor.vapor_kmol", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[offer(prefix = "reactor.reaction_rates", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[allow(clippy::type_complexity)]
-    fn thermodynamics(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, [f64; 8], [f64; 8], [f64; 8], [f64; 8]) {
+    fn physical_state(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, [f64; 8], [f64; 8], [f64; 8], [f64; 8]) {
         let vapor_group = self.vapor();
         let liquid_group = self.liquid();
 
@@ -171,7 +171,7 @@ impl Reactor {
     #[need(prefix = "reactor.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[need(key = "separator.pressure")]
     #[offer(key = "flows.stream_flow.7")]
-    fn outlet_flow(&self, own_pressure: f64, own_vapor: [f64; 8], separator_pressure: f64) -> f64 {
+    fn flow_to_separator(&self, own_pressure: f64, own_vapor: [f64; 8], separator_pressure: f64) -> f64 {
         let mol_weight: f64 = (0..8).map(|i| own_vapor[i] * self.constants.xmw[i]).sum();
         4574.21 * (own_pressure - separator_pressure).max(0.0).sqrt() * (1.0 - 0.25 * 0.0) / mol_weight /* disturbance channel 11, neutro */
     }
@@ -187,7 +187,7 @@ impl Reactor {
     DECISÃO DE MODELAGEM: a vazão de água é função EXCLUSIVA da abertura da válvula
     (`valve.reactor_cooling_water.position`, XMV 10) — este modelo não representa rede de tubulação
     nem queda de pressão na linha de resfriamento, mesma simplificação já usada em toda vazão
-    process-side (`Reactor::outlet_flow`, `Compressor::outlet_flows`: abertura de válvula ⇒ vazão,
+    process-side (`Reactor::flow_to_separator`, `Compressor::outlet_flows`: abertura de válvula ⇒ vazão,
     ponto, sem física de tubulação intermediária). A partir dessa vazão, a temperatura de RETORNO
     da água (`twr`) é a solução de um balanço de calor quase-estático entre a água (capacidade
     térmica `fcwr * REACTOR_COOLING_WATER_CAPACITY`, entrando a `REACTOR_COOLING_WATER_INLET`) e o
@@ -209,7 +209,7 @@ impl Reactor {
     #[need(key = "valve.reactor_cooling_water.position")]
     #[offer(key = "heat.reactor_heat")]
     #[offer(key = "heat.reactor_cooling_water_return")]
-    fn heat(
+    fn heat_exchange(
         &self,
         reactor_liquid_volume: f64,
         reactor_temperature: f64,
@@ -271,7 +271,7 @@ impl Reactor {
     #[offer(prefix = "reactor.state", components = ["liquid_d.derivative", "liquid_e.derivative", "liquid_f.derivative", "liquid_g.derivative", "liquid_h.derivative"])]
     #[offer(key = "reactor.state.enthalpy.derivative")]
     #[allow(clippy::too_many_arguments)]
-    fn yp_derivative(
+    fn mass_and_energy_balance(
         &self,
         compressor_vapor: [f64; 8],
         compressor_temperature: f64,
@@ -315,7 +315,7 @@ impl Reactor {
     #[offer(key = "xmeas.reactor.level")]
     #[offer(key = "xmeas.reactor.temperature")]
     #[offer(key = "xmeas.reactor.cooling_water_outlet_temperature")]
-    fn xmeas_conversions(&self, pressure: f64, liquid_volume: f64, temperature: f64, cooling_water_return: f64) -> (f64, f64, f64, f64) {
+    fn xmeas_readings(&self, pressure: f64, liquid_volume: f64, temperature: f64, cooling_water_return: f64) -> (f64, f64, f64, f64) {
         let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
         let xmeas_level = (liquid_volume - 84.6) / 666.7 * 100.0;
 

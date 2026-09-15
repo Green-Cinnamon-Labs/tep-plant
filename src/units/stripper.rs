@@ -39,7 +39,7 @@ impl Stripper {
     #[offer(key = "stripper.liquid_volume")]
     #[offer(key = "stripper.liquid_density")]
     #[offer(prefix = "stripper.liquid_composition", components = ["0", "1", "2", "3", "4", "5", "6", "7"])]
-    fn thermodynamics(&self, separator_temperature: f64) -> (f64, f64, f64, [f64; 8]) {
+    fn physical_state(&self, separator_temperature: f64) -> (f64, f64, f64, [f64; 8]) {
         let liquid_group = self.liquid();
         let mut liquid_moles = [0.0f64; 8];
         for i in 0..8 {
@@ -66,7 +66,7 @@ impl Stripper {
     */
     #[need(key = "valve.stripper_product.position")]
     #[offer(key = "flows.stream_flow.12")]
-    fn outlet_flow(&self, position: f64) -> f64 {
+    fn product_flow(&self, position: f64) -> f64 {
         position * STRIPPER_PRODUCT_RANGE / 100.0
     }
 
@@ -141,7 +141,7 @@ impl Stripper {
     #[need(key = "valve.stripper_steam.position")]
     #[need(key = "stripper.temperature")]
     #[offer(key = "heat.condenser_heat")]
-    fn heat(&self, steam_position: f64, stripper_temperature: f64) -> f64 {
+    fn heat_exchange(&self, steam_position: f64, stripper_temperature: f64) -> f64 {
         let condenser_ua = steam_position * STRIPPER_STEAM_RANGE / 100.0;
         if stripper_temperature < 100.0 {
             condenser_ua * (100.0 - stripper_temperature)
@@ -168,7 +168,7 @@ impl Stripper {
     #[offer(prefix = "stripper.state", components = ["0.derivative", "1.derivative", "2.derivative", "3.derivative", "4.derivative", "5.derivative", "6.derivative", "7.derivative"])]
     #[offer(key = "stripper.state.8.derivative")]
     #[allow(clippy::too_many_arguments)]
-    fn yp_derivative(
+    fn mass_and_energy_balance(
         &self,
         flash_liquid_flow: [f64; 8],
         flash_vapor_flow: [f64; 8],
@@ -233,7 +233,7 @@ impl Stripper {
     #[offer(key = "xmeas.stream11.flow_rate")]
     #[offer(key = "xmeas.stripper.temperature")]
     #[offer(key = "xmeas.stripper.steam_flow_rate")]
-    fn xmeas_conversions(&self, liquid_volume: f64, product_flow: f64, liquid_density: f64, temperature: f64, condenser_heat: f64) -> (f64, f64, f64, f64) {
+    fn xmeas_readings(&self, liquid_volume: f64, product_flow: f64, liquid_density: f64, temperature: f64, condenser_heat: f64) -> (f64, f64, f64, f64) {
         let xmeas_level = (liquid_volume - 78.25) / 156.5 * 100.0;
         let xmeas_underflow = product_flow / liquid_density / 35.3145;
         let xmeas_steam_flow = condenser_heat * 1.04e3 * 0.454;

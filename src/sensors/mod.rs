@@ -5,7 +5,7 @@
 nenhum `build_tep()` (nem `main()`) precisa conhecer nenhum destes tipos.
 
 As 22 XMEAS diretas (1-22) mais `status.shutdown_detected` (diagnóstico à parte, fora da contagem
-41 XMEAS + 12 XMV) — todas já computadas e publicadas pela tarefa `xmeas_conversions` de cada unidade
+41 XMEAS + 12 XMV) — todas já computadas e publicadas pela tarefa `xmeas_readings` de cada unidade
 em `units/` (issue 10 — `measured.rs` foi dissolvido, cada unidade publica sua própria conversão),
 aqui só expostas via `#[sensor(key=...)]`. As 19 XMEAS de composição (23-41) são publicadas pelas
 tarefas `reactor_feed_analysis`/`purge_analysis`/`product_analysis` (Compressor/Separator/Stripper)

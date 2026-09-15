@@ -40,7 +40,7 @@ impl Compressor {
     #[offer(key = "compressor.temperature")]
     #[offer(key = "compressor.pressure")]
     #[offer(prefix = "compressor.vapor_composition", components = ["0", "1", "2", "3", "4", "5", "6", "7"])]
-    fn thermodynamics(&self, separator_temperature: f64) -> (f64, f64, [f64; 8]) {
+    fn physical_state(&self, separator_temperature: f64) -> (f64, f64, [f64; 8]) {
         let vapor_group = self.vapor();
         let mut vapor_moles = [0.0f64; 8];
         for i in 0..8 {
@@ -134,7 +134,7 @@ impl Compressor {
     #[offer(prefix = "compressor.state", components = ["0.derivative", "1.derivative", "2.derivative", "3.derivative", "4.derivative", "5.derivative", "6.derivative", "7.derivative"])]
     #[offer(key = "compressor.state.8.derivative")]
     #[allow(clippy::too_many_arguments)]
-    fn yp_derivative(
+    fn mass_and_energy_balance(
         &self,
         flow0: f64,
         flow1: f64,
@@ -212,7 +212,7 @@ impl Compressor {
     #[offer(key = "xmeas.stream6.flow_rate")]
     #[offer(key = "xmeas.stripper.pressure")]
     #[offer(key = "xmeas.compressor.work")]
-    fn xmeas_conversions(&self, recycle_flow: f64, reactor_feed_flow: f64, pressure: f64, work: f64) -> (f64, f64, f64, f64) {
+    fn xmeas_readings(&self, recycle_flow: f64, reactor_feed_flow: f64, pressure: f64, work: f64) -> (f64, f64, f64, f64) {
         let xmeas_recycle_flow = recycle_flow * 0.359 / 35.3145;
         let xmeas_reactor_feed_rate = reactor_feed_flow * 0.359 / 35.3145;
         let xmeas_stripper_pressure = (pressure - 760.0) / 760.0 * 101.325;
@@ -228,7 +228,7 @@ mod tests {
     use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::StateRegistry;
 
-    /* As 3 tarefas (`thermodynamics`/`outlet_flows`/`yp_derivative`) não têm teste isolado aqui:
+    /* As 3 tarefas (`physical_state`/`outlet_flows`/`mass_and_energy_balance`) não têm teste isolado aqui:
     quase todo `#[need]` delas é ofertado por OUTRA unidade real (Reactor/Separator/Stripper/Flows)
     descoberta pelo MESMO `inventory` — testar de verdade exigiria ou (a) reconstruir o mesmo
     conjunto de dependências via `attach_discovered_components`, que já vira um teste de PLANTA

@@ -97,7 +97,7 @@ impl Feed {
     #[offer(key = "xmeas.stream3.flow_rate")]
     #[offer(key = "xmeas.stream4.flow_rate")]
     #[allow(clippy::too_many_arguments)]
-    fn xmeas_conversions(
+    fn xmeas_readings(
         &self,
         a_feed_flow: f64,
         d_feed_flow: f64,

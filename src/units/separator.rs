@@ -51,7 +51,7 @@ impl Separator {
     #[offer(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[offer(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[allow(clippy::too_many_arguments)]
-    fn thermodynamics(&self, reactor_temperature: f64) -> (f64, f64, f64, f64, f64, [f64; 8], [f64; 8]) {
+    fn physical_state(&self, reactor_temperature: f64) -> (f64, f64, f64, f64, f64, [f64; 8], [f64; 8]) {
         let vapor_group = self.vapor();
         let liquid_group = self.liquid();
         let mut vapor_moles = [0.0f64; 8];
@@ -123,7 +123,7 @@ impl Separator {
     #[need(key = "flows.stream_flow.7")]
     #[offer(key = "heat.separator_heat")]
     #[offer(key = "heat.separator_cooling_water_return")]
-    fn heat(&self, reactor_temperature: f64, reactor_to_separator_flow: f64) -> (f64, f64) {
+    fn heat_exchange(&self, reactor_temperature: f64, reactor_to_separator_flow: f64) -> (f64, f64) {
         let uas = 0.404655 * (1.0 - 1.0 / (1.0 + (reactor_to_separator_flow / 3528.73).powi(4)));
         let separator_heat = uas * (SEPARATOR_COOLING_WATER_RETURN - reactor_temperature) * (1.0 - 0.25 * 0.0);
 
@@ -150,7 +150,7 @@ impl Separator {
     #[offer(prefix = "separator.state", components = ["liquid_d.derivative", "liquid_e.derivative", "liquid_f.derivative", "liquid_g.derivative", "liquid_h.derivative"])]
     #[offer(key = "separator.state.enthalpy.derivative")]
     #[allow(clippy::too_many_arguments)]
-    fn yp_derivative(
+    fn mass_and_energy_balance(
         &self,
         reactor_vapor: [f64; 8],
         reactor_temperature: f64,
@@ -222,7 +222,7 @@ impl Separator {
     #[offer(key = "xmeas.stream10.flow_rate")]
     #[offer(key = "xmeas.separator.cooling_water_outlet_temperature")]
     #[allow(clippy::too_many_arguments)]
-    fn xmeas_conversions(
+    fn xmeas_readings(
         &self,
         purge_flow: f64,
         temperature: f64,
