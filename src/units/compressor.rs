@@ -228,16 +228,133 @@ mod tests {
     use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::StateRegistry;
 
-    /* As 3 tarefas (`physical_state`/`outlet_flows`/`mass_and_energy_balance`) não têm teste isolado aqui:
-    quase todo `#[need]` delas é ofertado por OUTRA unidade real (Reactor/Separator/Stripper/Flows)
-    descoberta pelo MESMO `inventory` — testar de verdade exigiria ou (a) reconstruir o mesmo
-    conjunto de dependências via `attach_discovered_components`, que já vira um teste de PLANTA
-    INTEIRA (coberto por `tests::wires_and_evaluates_without_panicking`, `src/lib.rs`, sem
-    duplicar aqui), ou (b) construir os structs-tarefa privados gerados pela macro à mão (frágil —
-    depende de nomes internos de campo que a macro pode mudar). Cobertura real de valor
-    hand-computed pra estas 3 tarefas fica pro golden-trace de fim de migração (plano, seção
-    "Verificação").
+    /* Investigação do Experimento 20 (spec-tennessee-eastman/experimentos.md), continuação do Exp
+    19: o Exp 19 descartou `Reactor::physical_state`/`mass_and_energy_balance` como origem do
+    colapso ainda observado depois dos dois fixes de água de resfriamento (Exp 18). Esta seção
+    testa os métodos análogos de `Compressor` — apesar da nota antiga acima (agora desatualizada)
+    dizer que "não dá pra testar sem `attach_discovered_components`", chamar os métodos privados
+    gerados pela macro (`__physical_state_impl`, `__mass_and_energy_balance_impl`) direto, com
+    valores de entrada escolhidos à mão, funciona igual ao que já foi feito em `reactor.rs` — não
+    precisa da planta inteira, só dos `#[need]` como parâmetros de função normal.
     */
+
+    #[test]
+    fn physical_state_matches_nominal_operating_point_from_application_toml() {
+        /* `separator_temperature` é um `#[need]` externo aqui — em vez de chutar um número,
+        computamos ele de verdade a partir de `Separator::physical_state` com o próprio estado
+        nominal do separador (mesma técnica de "confiar só em valores já validados", não em
+        números de memória). Exp 19 já confirmou `Reactor::physical_state` correto; usamos 120°C
+        (nominal documentado) como a temperatura do reator que o separador precisa.
+        */
+        use crate::units::separator::Separator;
+
+        let registry = StateRegistry::shared();
+        let separator = Separator::new(
+            &mut registry.borrow_mut(),
+            &Snapshot::from_pairs(&[
+                ("state.separator_vapor.A", 63.337045809835196),
+                ("state.separator_vapor.B", 27.67808577797886),
+                ("state.separator_vapor.C", 45.480330241132435),
+                ("state.separator_vapor.D", 0.2398728094022691),
+                ("state.separator_vapor.E", 14.845882843614561),
+                ("state.separator_vapor.F", 1.9220259408956704),
+                ("state.separator_vapor.G", 52.521987477541764),
+                ("state.separator_vapor.H", 41.289131421711694),
+                ("state.separator.energy", 0.571326790156296),
+            ]),
+        );
+        let (separator_temperature, ..) = separator.__physical_state_impl(120.0);
+
+        let initial = Snapshot::from_pairs(&[
+            ("state.compressor_vapor.A", 107.18718027273283),
+            ("state.compressor_vapor.B", 30.801210941908113),
+            ("state.compressor_vapor.C", 87.22311903671716),
+            ("state.compressor_vapor.D", 22.921606015837646),
+            ("state.compressor_vapor.E", 61.9020790931974),
+            ("state.compressor_vapor.F", 5.777503238613575),
+            ("state.compressor_vapor.G", 12.022672768816811),
+            ("state.compressor_vapor.H", 5.609107990171663),
+            ("state.compressor.energy", 0.9193937935424599),
+        ]);
+        let compressor = Compressor::new(&mut registry.borrow_mut(), &initial);
+        let (temperature, pressure, _vapor_composition) = compressor.__physical_state_impl(separator_temperature);
+
+        /* Faixas com folga generosa (mesmo espírito do teste equivalente em reactor.rs) — o
+        objetivo é pegar um colapso grosseiro, não validar casas decimais de um nominal que este
+        arquivo não documentava antes.
+        */
+        assert!(
+            (40.0..90.0).contains(&temperature),
+            "esperava compressor.temperature numa faixa plausível (a partir de separator_temperature={separator_temperature}°C), obteve {temperature}°C"
+        );
+
+        /* XMEAS(16) roda genuinamente mais alto que a pressão do reator/separador (~2700/~2633) —
+        não é bug, é a pressão de descarga do próprio compressor. Faixa (2900,3300) escolhida
+        depois de rodar este teste pela primeira vez com um chute errado (~2700) e ver 3091.3 kPa
+        sair — valor plausível (perto do nominal ~3100 kPa comumente citado na literatura do TEP
+        pra esta variável), não uma falha.
+        */
+        let xmeas_stripper_pressure = (pressure - 760.0) / 760.0 * 101.325;
+        assert!(
+            (2900.0..3300.0).contains(&xmeas_stripper_pressure),
+            "esperava XMEAS(16) (pressão do compressor, apesar do nome) numa faixa plausível (~3100 kPa), obteve {xmeas_stripper_pressure} kPa"
+        );
+    }
+
+    /* `outlet_flows`: `flow6` é definido como cópia bit-a-bit de `flow5` (Block 31 do teprob.f,
+    "bypass") — um invariante estrutural fácil de quebrar sem querer numa refatoração futura
+    (ex.: trocar `flow6` por outra fórmula por engano). Barato de testar, caro de deixar passar.
+    */
+    #[test]
+    fn outlet_flows_bypass_is_an_exact_copy_of_recycle_flow() {
+        let registry = StateRegistry::shared();
+        let compressor = Compressor::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let separator_vapor = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let (flow5, flow6, ..) = compressor.__outlet_flows_impl(
+            25000.0, /* compressor_pressure (mmHg) */
+            21000.0, /* reactor_pressure (mmHg) */
+            20000.0, /* separator_pressure (mmHg) */
+            80.1,    /* separator_temperature */
+            separator_vapor,
+            separator_vapor, /* compressor_vapor — mesma composição só pra simplificar o teste */
+            22.21,           /* compressor_recycle_position (nominal, docs/07-controle.md) */
+        );
+
+        assert_eq!(flow6, flow5, "flow6 (bypass) deveria ser sempre uma cópia exata de flow5 (recycle)");
+    }
+
+    /* `mass_and_energy_balance`: com feeds frescos zerados (flow0/1/2=0), sem vapor de flash
+    (flash_vapor_flow=0) e o reciclo balanceado (mesma composição/entalpia entrando e saindo, na
+    mesma vazão), nada deveria se acumular — mesma técnica de "fluxo balanceado" já usada nos
+    testes de `Reactor::mass_and_energy_balance`.
+    */
+    #[test]
+    fn mass_and_energy_balance_cancels_when_only_recycle_flow_is_present_and_balanced() {
+        let registry = StateRegistry::shared();
+        let compressor = Compressor::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let temperature = 45.0;
+        let flow = 300.0;
+        let discharge_enthalpy = mixture_enthalpy(&composition, temperature, 1, &compressor.constants);
+
+        let (vapor_derivative, enthalpy_derivative) = compressor.__mass_and_energy_balance_impl(
+            0.0, 0.0, 0.0, /* flow0/1/2: sem feed fresco */
+            0.0,           /* flow4: sem vazão de flash (o vetor flash_vapor_flow já é zero) */
+            flow,          /* flow5: reciclo saindo */
+            flow,          /* flow8: reciclo entrando, mesma vazão */
+            [0.0; 8],      /* flash_vapor_flow: sem vapor de flash */
+            composition,   /* separator_vapor — mesma composição do compressor */
+            temperature,   /* stripper_temperature: não importa aqui (flash_vapor_flow=0) */
+            discharge_enthalpy,
+            composition, /* compressor_vapor */
+            temperature, /* compressor_temperature */
+        );
+
+        assert_eq!(vapor_derivative, [0.0; 8], "reciclo com mesma composição/vazão entrando e saindo não deveria acumular nada");
+        assert_eq!(enthalpy_derivative, 0.0, "reciclo balanceado (mesma entalpia/vazão) não deveria gerar entalpia líquida");
+    }
 
     #[test]
     fn new_seeds_own_state_with_initial_condition() {

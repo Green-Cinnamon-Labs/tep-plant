@@ -6,8 +6,24 @@ use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enth
 const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [m³] */
 const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
 const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0; /* VRNG (TEINIT) da válvula de underflow */
-/* Nominal — mesmo `s_zero` de TepDisturbanceState, canal 5 (TCWS, "condenser cooling water temp"). */
-const SEPARATOR_COOLING_WATER_RETURN: f64 = 40.0;
+
+/* Temperatura de RETORNO da água de resfriamento do separador (`tws`) — diferente do reator
+(`Reactor::heat_exchange`), aqui é mesmo uma constante no teprob.f original: Block 40 do modelo
+monolítico (`v1.0.0`) marca a derivada de `tws` como sempre zero ("tws kept at snapshot value"),
+então não existe balanço de calor quase-estático nenhum pra resolver aqui — só o valor congelado
+que o snapshot inicial semeou.
+
+NOTA (2026-09-15): antes desta correção, esta constante era 40.0 — o `s_zero` do canal de
+distúrbio 5 (TCWS, temperatura de ENTRADA da água de resfriamento do separador), não `tws`. Mesmo
+erro de troca entrada/saída do bug já corrigido em `Reactor::heat_exchange`, achado ao comparar
+contra `application.toml`/`te_exp3_snapshot.toml`: `[state.cooling].separator_water_temp =
+77.29698353` é o valor congelado de verdade. Consequência: o separador resfriava mais forte que o
+correto, empurrando entalpia fria pro reciclo do compressor — um dos dois termos dominantes do
+balanço de energia do reator (`Reactor::mass_and_energy_balance`) — contribuindo pro colapso rápido
+de temperatura do reator observado ao vivo (120°C → ~42°C em ~21 min simulados) mesmo já com a
+correção do reator sozinha aplicada.
+*/
+const SEPARATOR_COOLING_WATER_RETURN: f64 = 77.29698353;
 
 /** Terceira unidade migrada pro scheduler de dataflow topológico (issue 10), depois de Feed e
 Compressor. Absorve de `flows.rs`: Block 22/25 (slots 9/10, purge e underflow). De `heat.rs`:
@@ -51,7 +67,7 @@ impl Separator {
     #[offer(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[offer(prefix = "separator.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[allow(clippy::too_many_arguments)]
-    fn physical_state(&self, reactor_temperature: f64) -> (f64, f64, f64, f64, f64, [f64; 8], [f64; 8]) {
+    pub(crate) fn physical_state(&self, reactor_temperature: f64) -> (f64, f64, f64, f64, f64, [f64; 8], [f64; 8]) {
         let vapor_group = self.vapor();
         let liquid_group = self.liquid();
         let mut vapor_moles = [0.0f64; 8];
@@ -279,5 +295,119 @@ mod tests {
         assert_eq!(separator.vapor(), [0.0; 3]);
         assert_eq!(separator.liquid(), [0.0; 5]);
         assert_eq!(separator.enthalpy(), 0.0);
+    }
+
+    /* Investigação do Experimento 20 (spec-tennessee-eastman/experimentos.md) — mesma técnica dos
+    testes equivalentes de `reactor.rs`/`compressor.rs`: chamar os métodos privados gerados pela
+    macro direto, com entradas conhecidas, sem precisar da planta inteira via
+    `attach_discovered_components`.
+    */
+    #[test]
+    fn physical_state_matches_nominal_operating_point_from_application_toml() {
+        let registry = StateRegistry::shared();
+        let initial = Snapshot::from_pairs(&[
+            ("state.separator_vapor.A", 63.337045809835196),
+            ("state.separator_vapor.B", 27.67808577797886),
+            ("state.separator_vapor.C", 45.480330241132435),
+            ("state.separator_vapor.D", 0.2398728094022691),
+            ("state.separator_vapor.E", 14.845882843614561),
+            ("state.separator_vapor.F", 1.9220259408956704),
+            ("state.separator_vapor.G", 52.521987477541764),
+            ("state.separator_vapor.H", 41.289131421711694),
+            ("state.separator.energy", 0.571326790156296),
+        ]);
+
+        let separator = Separator::new(&mut registry.borrow_mut(), &initial);
+        let (temperature, pressure, ..) = separator.__physical_state_impl(120.0); /* reactor.temperature nominal */
+
+        /* Faixas com folga generosa (mesmo espírito de reactor.rs/compressor.rs) — pegar um
+        colapso grosseiro, não validar casas decimais de um nominal que este arquivo não
+        documentava antes.
+        */
+        assert!(
+            (60.0..100.0).contains(&temperature),
+            "esperava separator.temperature numa faixa plausível (mais fria que o reator, ~120°C), obteve {temperature}°C"
+        );
+
+        let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
+        assert!(
+            (2400.0..2800.0).contains(&xmeas_pressure),
+            "esperava XMEAS(13) perto do nominal ~2633 kPa, obteve {xmeas_pressure} kPa"
+        );
+    }
+
+    /* Regressão direta do bug do Exp 18: `heat_exchange` sempre devolve
+    `SEPARATOR_COOLING_WATER_RETURN` como segunda saída (é uma constante congelada, não calculada)
+    — este teste existe só pra travar o valor certo (77.29698353, `[state.cooling].
+    separator_water_temp` de `application.toml`) contra uma futura regressão de volta pro 40.0
+    errado (`s_zero` do canal de distúrbio 5, TCWS — entrada, não retorno).
+    */
+    #[test]
+    fn heat_exchange_returns_the_corrected_frozen_return_temperature() {
+        let registry = StateRegistry::shared();
+        let separator = Separator::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let (_separator_heat, cooling_water_return) = separator.__heat_exchange_impl(120.0, 4000.0);
+
+        assert_eq!(cooling_water_return, 77.29698353, "regressão pro bug do Exp 18 — TCWS de entrada no lugar do tws de retorno");
+    }
+
+    /* `mass_and_energy_balance`: com o vapor do reator entrando (`flow7`) e saindo em duas frações
+    que somam exatamente o que entrou (`flow8+flow9`, mesma composição, `flow10=0`), nada deveria
+    se acumular — mesma técnica de "fluxo balanceado" de `reactor.rs`/`compressor.rs`.
+    */
+    #[test]
+    fn mass_and_energy_balance_cancels_when_outflow_matches_inflow_exactly() {
+        let registry = StateRegistry::shared();
+        let separator = Separator::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let temperature = 100.0;
+        let enthalpy = mixture_enthalpy(&composition, temperature, 1, &separator.constants);
+
+        let (vapor_derivative, liquid_derivative, enthalpy_derivative) = separator.__mass_and_energy_balance_impl(
+            composition, /* reactor_vapor */
+            temperature, /* reactor_temperature */
+            100.0,       /* flow7: entrando */
+            60.0,        /* flow8: saindo (reciclo) */
+            40.0,        /* flow9: saindo (purge) — 60+40 = 100, balanceado */
+            0.0,         /* flow10: sem underflow líquido */
+            composition, /* separator_vapor — mesma composição */
+            [0.0; 8],    /* separator_liquid — sem líquido (flow10=0 de qualquer forma) */
+            temperature, /* separator_temperature — mesma do reator, pra enthalpy_reactor_outlet == enthalpy_separator_vapor_uncorrected */
+            enthalpy,    /* compressor_discharge_enthalpy — igual à entalpia da mesma composição/temperatura, cancela com flow8 */
+            0.0,         /* separator_heat */
+        );
+
+        assert_eq!(vapor_derivative, [0.0; 3], "vazão de saída igual à de entrada não deveria acumular nada");
+        assert_eq!(liquid_derivative, [0.0; 5], "vazão de saída igual à de entrada não deveria acumular nada");
+        assert_eq!(enthalpy_derivative, 0.0, "entalpias e vazões balanceadas não deveriam gerar entalpia líquida");
+    }
+
+    #[test]
+    fn mass_and_energy_balance_passes_through_separator_heat_when_flows_are_balanced() {
+        let registry = StateRegistry::shared();
+        let separator = Separator::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+
+        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let temperature = 100.0;
+        let enthalpy = mixture_enthalpy(&composition, temperature, 1, &separator.constants);
+        let separator_heat = -6.5;
+
+        let (.., enthalpy_derivative) = separator.__mass_and_energy_balance_impl(
+            composition,
+            temperature,
+            100.0,
+            60.0,
+            40.0,
+            0.0,
+            composition,
+            [0.0; 8],
+            temperature,
+            enthalpy,
+            separator_heat,
+        );
+
+        assert_eq!(enthalpy_derivative, separator_heat, "com fluxos e entalpias balanceados, só separator_heat deveria sobrar");
     }
 }
