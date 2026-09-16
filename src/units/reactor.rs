@@ -10,28 +10,40 @@ const REACTION_FACTOR_1_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Dist
 const REACTION_FACTOR_2_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
 const TEMPERATURE_SEED: f64 = 120.0; /* seed do Newton-Raphson — não afeta a raiz */
 
-/* Temperatura de ENTRADA da água de resfriamento do reator (TCWR) — nominal. IDV(4)/IDV(11)
-perturbariam isso; ainda não conectado (issue #62), fica fixo.
+/* Temperatura de SAÍDA da água de resfriamento do reator (TWR) — congelada, fiel ao FORTRAN
+original (TEFUNC: YP(37) nunca é atribuído, TWR fica constante no valor de inicialização) e ao
+próprio `[state.cooling].reactor_water_temp` de `application.toml`. Mesmo padrão já usado em
+`Separator::heat_exchange` (`SEPARATOR_COOLING_WATER_RETURN`), nunca mexido nesta novela.
 
-NOTA (2026-09-15, Exp 23): valor corrigido de 35.0 para 38.5. O comentário original do Block 32 em
-`v1.0.0` já dizia "cpcw_eff calibrated to yield twr≈94.6°C at nominal (tcwr=38.5, ...)" — mas o
-código então em uso aqui copiava, por engano, o `s_zero` do canal 4 de `TepDisturbanceState`
-(35.0), que é uma constante DIFERENTE (a condição INICIAL do canal de distúrbio, não o valor
-nominal usado na calibração de `cpcw_eff` documentada no próprio Block 32). Confirmado
-empiricamente: alimentando `heat_exchange()` com o estado exato de
-`docs/simulations/simulation_log_13.csv` (200 ticks da trajetória validada), o `twr` implícito
-necessário pra bater com `XMEAS(21)` tinha média 37.98°C (variação 37.4–38.7, plausível dado
-pequenos erros de arredondamento acumulados em `temperature`/`volume_liquid`) — direto na faixa do
-38.5 documentado, nunca perto de 35.0. Com 35.0, `twr` saía sistematicamente ~0.8–1.06°C ABAIXO do
-valor real em todos os 200 ticks testados (muito acima do ruído de medição de XMEAS(21), σ=0.01) —
-um viés pequeno mas constante que alimenta `reactor_heat` (Block 32) todo tick, exatamente o tipo de
-erro sistemático que a Exp 21 já tinha caracterizado (divergência suave, não um salto).
+NOTA (2026-09-16, Exp 24): existiu aqui uma fórmula quase-estática (`twr` como média ponderada de
+`uar`/`tcr` e a água de entrada) que foi REMOVIDA — não é regressão, é correção de um erro estrutural
+descoberto ao investigar por que a `v1.0.0` (usada como "ground truth" nos Exp 18-23) tinha essa
+fórmula ativa. Arqueologia via `git log --follow` em
+`tennessee-eastman-service/core/src/dynamics/tep/model.rs`:
+
+  - 2026-03-09 (`b4c2077`): existia uma EDO própria pra `twr`/`tws` (não a fórmula quase-estática,
+    uma dinâmica de 1ª ordem ainda mais forte) — revertida por "causar colapso da temperatura de
+    resfriamento pra ~35°C, destabilizando o balanço de energia do reator". Fiel ao FORTRAN
+    (`YP(37)` nunca atribuído) = TWR congelado, sem exceção.
+  - 2026-05-27 (`123a6a3`): a fórmula quase-estática foi introduzida DE NOVO, especificamente pra
+    dar ao IDV(4) algum efeito observável (com `twr` congelado, IDV(4) literalmente não faz nada —
+    o que estava emperrando o Exp 14 daquela época).
+  - 2026-05-28: a tag `v1.0.0` foi cortada — um dia depois, capturando a fórmula quase-estática
+    ainda ativa e não validada.
+  - 2026-06-01 (`ad08ea0`, "EXP14 Done"): a mesma fórmula foi comentada de volta pra `twr` congelado
+    — o autor documentou o motivo: "quando tcr cai abaixo de ~67°C o balanço produz twr < tcr →
+    QUR < 0 (trocador 'aquece' o reator), comportamento ausente no FORTRAN original".
+
+Ou seja: a MESMA classe de mecanismo foi tentada e revertida duas vezes por instabilidade — e a
+`v1.0.0` que este repositório vinha usando como referência validada é, por coincidência de datas, o
+único ponto da história onde ela ficou ativa. Confirmado empiricamente contra
+`docs/simulations/simulation_log_13.csv`: ao longo de 20h sem distúrbio, `reactor.temperature`
+(XMEAS(9)) varia ~0.49°C, mas `XMEAS(21)` (twr) varia só ~0.076°C — bem menos do que a fórmula
+quase-estática preveria (peso ~0.69 de `tcr` implicaria ~0.34°C de variação em `twr`) e plenamente
+consistente com `twr` congelado + ruído de medição (σ=0.01). O próprio baseline validado nunca usou
+essa fórmula.
 */
-const REACTOR_COOLING_WATER_INLET: f64 = 38.5;
-const REACTOR_COOLING_WATER_RANGE: f64 = 1000.0; /* VRNG (TEINIT) da válvula de água de resfriamento */
-/* cpcw_eff (TEINIT) — calibrado no FORTRAN original pra dar twr≈94.6°C no ponto nominal (fcwr≈41.1,
-tcr=120, uar≈0.856). */
-const REACTOR_COOLING_WATER_CAPACITY: f64 = 0.00942;
+const REACTOR_COOLING_WATER_RETURN: f64 = 94.59927549;
 
 /** Quinta e última unidade migrada pro scheduler de dataflow topológico (issue 10) — fecha a
 migração. Absorve de `flows.rs`: Block 22 (AGSP/agitation_factor — fundido direto em `heat`, sem
@@ -194,43 +206,27 @@ impl Reactor {
     /* Bloco 3 (ex-Heat, Block 32 + o AGSP de Block 22, que nunca teve dono além de ser consumido
     aqui mesmo — mesmo tratamento do `condenser_ua` em `units::stripper`): troca térmica entre o
     reator e sua água de resfriamento — UARLEV degrau/rampa/platô conforme o nível de líquido
-    (fração da serpentina submersa, ver explicação abaixo) pondera tanto a temperatura de RETORNO
-    da água quanto o calor que sai do reator; as duas contas usam o mesmo `uar`, por isso vivem
-    juntas num método só, não separadas em dois `#[need]`/`#[offer]` cruzando o `StateRegistry`
-    pra compartilhar um número que não é grandeza própria de ninguém de fora.
+    (fração da serpentina submersa, ver explicação abaixo) pondera o calor que sai do reator.
 
-    DECISÃO DE MODELAGEM: a vazão de água é função EXCLUSIVA da abertura da válvula
-    (`valve.reactor_cooling_water.position`, XMV 10) — este modelo não representa rede de tubulação
-    nem queda de pressão na linha de resfriamento, mesma simplificação já usada em toda vazão
-    process-side (`Reactor::flow_to_separator`, `Compressor::outlet_flows`: abertura de válvula ⇒ vazão,
-    ponto, sem física de tubulação intermediária). A partir dessa vazão, a temperatura de RETORNO
-    da água (`twr`) é a solução de um balanço de calor quase-estático entre a água (capacidade
-    térmica `fcwr * REACTOR_COOLING_WATER_CAPACITY`, entrando a `REACTOR_COOLING_WATER_INLET`) e o
-    reator (coeficiente de troca `uar`, a `reactor_temperature`) — média ponderada pelas duas
-    capacidades. Tradução direta do Block 32 do teprob.f original.
-
-    NOTA (2026-09-14): antes desta correção, este método usava uma constante fixa
-    (`REACTOR_COOLING_WATER_RETURN = 35.0`) no lugar de `twr` calculado — 35.0 é, na verdade,
-    `REACTOR_COOLING_WATER_INLET` (a água ENTRANDO, não saindo), então o reator resfriava ~3.3x
-    mais forte que o correto no nominal (força-motriz de 85 em vez de 25.4) e a válvula
-    (`valve.reactor_cooling_water.position`) ficava desconectada da física por completo — escrever
-    nela não tinha efeito nenhum. Consequência observada ao vivo: temperatura do reator estabilizava
-    perto de 35-38°C em vez de ~120°C; com a reação muito mais lenta nessa faixa, gás não-reagido
-    se acumulava até estourar o limite de pressão do ISD (3000 kPa).
+    NOTA (2026-09-16, Exp 24): a fórmula quase-estática que calculava `twr` (temperatura de RETORNO
+    da água) a partir da abertura da válvula (`valve.reactor_cooling_water.position`, XMV 10) foi
+    REMOVIDA — ver `REACTOR_COOLING_WATER_RETURN` acima pra arqueologia completa. Resumo: essa
+    fórmula já foi tentada e revertida duas vezes na história deste projeto (2026-03, 2026-06) por
+    causar exatamente este tipo de colapso térmico; a `v1.0.0` usada como referência nos Exp 18-23
+    só a tinha ativa por coincidência de datas (tag cortada um dia depois dela ter sido reintroduzida
+    e três dias antes de ser revertida de novo); e o próprio baseline validado
+    (`docs/simulations/simulation_log_13.csv`) mostra `twr` essencialmente congelado, não
+    respondendo a `tcr` com a sensibilidade que a fórmula preveria. `twr` volta a ser a constante
+    congelada `REACTOR_COOLING_WATER_RETURN`, fiel ao FORTRAN original — `valve.reactor_cooling_
+    water.position` deixa de ser um `#[need]` daqui (não afeta esta física, mesma conclusão a que o
+    projeto já tinha chegado em 2026-03/2026-06 e que só não tinha sido reaplicada aqui).
     */
     #[need(key = "reactor.liquid_volume")]
     #[need(key = "reactor.temperature")]
     #[need(key = "agitator.speed")]
-    #[need(key = "valve.reactor_cooling_water.position")]
     #[offer(key = "heat.reactor_heat")]
     #[offer(key = "heat.reactor_cooling_water_return")]
-    fn heat_exchange(
-        &self,
-        reactor_liquid_volume: f64,
-        reactor_temperature: f64,
-        agitator_speed: f64,
-        cooling_water_position: f64,
-    ) -> (f64, f64) {
+    fn heat_exchange(&self, reactor_liquid_volume: f64, reactor_temperature: f64, agitator_speed: f64) -> (f64, f64) {
         /* UARLEV: fração da serpentina submersa, 0 abaixo de level=10 (seca, sem troca), rampa
         linear até level=50, platô em 1.0 dali pra cima (totalmente submersa — mais líquido não
         aumenta mais nada).
@@ -246,24 +242,19 @@ impl Reactor {
         };
         let uar = uar_level * (-0.5 * agitation_factor * agitation_factor + 2.75 * agitation_factor - 2.5) * 855490e-6;
 
-        /* fcwr: vazão da água, só função da válvula (decisão de modelagem acima) — escala
-        `posição * VRNG * 0.001`, não `posição * VRNG / 100` como as outras válvulas: é assim que o
-        Block 32 original define fcwr, calibrado junto com REACTOR_COOLING_WATER_CAPACITY.
+        /* Fórmula quase-estática removida (Exp 24) — preservada aqui só como referência, nunca
+        compilada:
+        //
+        // let fcwr = cooling_water_position * REACTOR_COOLING_WATER_RANGE * 0.001;
+        // let cw_capacity = fcwr * REACTOR_COOLING_WATER_CAPACITY; // REACTOR_COOLING_WATER_CAPACITY = 0.00942
+        // let total_capacity = cw_capacity + uar;
+        // let twr = if total_capacity > 1e-12 {
+        //     (cw_capacity * REACTOR_COOLING_WATER_INLET + uar * reactor_temperature) / total_capacity // REACTOR_COOLING_WATER_INLET = 38.5
+        // } else {
+        //     reactor_temperature
+        // };
         */
-        let fcwr = cooling_water_position * REACTOR_COOLING_WATER_RANGE * 0.001;
-        let cw_capacity = fcwr * REACTOR_COOLING_WATER_CAPACITY;
-        let total_capacity = cw_capacity + uar;
-
-        /* Guarda contra 0/0: só degenera quando fcwr E uar são ambos ~0 (válvula fechada com
-        nível fora da faixa de agitação eficaz) — nesse caso `uar=0` já zera reactor_heat de
-        qualquer forma, então cair em reactor_temperature (força-motriz zero) é seguro, só evita
-        NaN se propagando pro resto da simulação (uar * NaN não seria zero).
-        */
-        let twr = if total_capacity > 1e-12 {
-            (cw_capacity * REACTOR_COOLING_WATER_INLET + uar * reactor_temperature) / total_capacity
-        } else {
-            reactor_temperature
-        };
+        let twr = REACTOR_COOLING_WATER_RETURN;
 
         let reactor_heat = uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0); /* disturbance channel 9 (IDV 10), neutro */
 
@@ -505,17 +496,22 @@ mod tests {
         assert_eq!(enthalpy_derivative, heat_of_reaction + reactor_heat);
     }
 
-    /** Experimento 23 (spec-tennessee-eastman/experimentos.md). O Exp 19 provou que `physical_state()`
-    reproduz o nominal — mas um ÚNICO ponto não pega um bug que só aparece fora dele. Este teste é
-    bem mais rigoroso: para cada um dos primeiros 200 ticks de
+    /** Experimento 23/24 (spec-tennessee-eastman/experimentos.md). O Exp 19 provou que
+    `physical_state()` reproduz o nominal — mas um ÚNICO ponto não pega um bug que só aparece fora
+    dele. Este teste é bem mais rigoroso: para cada um dos primeiros 200 ticks de
     `docs/simulations/simulation_log_13.csv` (a trajetória REAL, validada, do Exp 13), alimenta
-    `physical_state()`/`heat_exchange()` com o estado EXATO (`YY[0..8]`, `XMV(10)`, `XMV(12)`) que a
-    planta validada tinha naquele instante — e compara a saída contra o `XMEAS(7)`/`XMEAS(9)`/
-    `XMEAS(21)` que a MESMA planta validada mediu no MESMO instante. Se a fórmula estiver certa, dar
-    o estado certo tem que produzir a medida certa em QUALQUER ponto da trajetória, não só no
-    nominal — isso isola `Reactor` por completo do resto da planta (nenhum `#[need]` externo entra
-    aqui, só o próprio estado + duas posições de válvula), então qualquer divergência encontrada
-    aqui é, por eliminação, um bug de fórmula dentro do próprio `Reactor`, não de acoplamento.
+    `physical_state()`/`heat_exchange()` com o estado EXATO (`YY[0..8]`, `XMV(12)`) que a planta
+    validada tinha naquele instante — e compara a saída contra o `XMEAS(7)`/`XMEAS(9)`/`XMEAS(21)`
+    que a MESMA planta validada mediu no MESMO instante. Se a fórmula estiver certa, dar o estado
+    certo tem que produzir a medida certa em QUALQUER ponto da trajetória, não só no nominal — isso
+    isola `Reactor` por completo do resto da planta, então qualquer divergência encontrada aqui é,
+    por eliminação, um bug de fórmula dentro do próprio `Reactor`, não de acoplamento.
+
+    Desde o Exp 24, `twr` é uma constante congelada (`REACTOR_COOLING_WATER_RETURN`) — a
+    comparação contra `XMEAS(21)` continua valiosa (confirma que a constante escolhida bate com o
+    que o baseline validado realmente mediu), só que agora o limiar pode ser bem mais apertado, já
+    que não sobra nenhuma dependência de `tcr`/nível/agitação pra propagar erro nenhum: a única
+    fonte de diferença é o ruído de medição do próprio CSV.
     */
     #[test]
     fn physical_state_and_heat_exchange_match_the_validated_csv_at_many_points_along_the_real_trajectory() {
@@ -531,8 +527,6 @@ mod tests {
             let xmeas7 = fields[7];
             let xmeas9 = fields[9];
             let xmeas21 = fields[21];
-            let xmv10 = fields[32];
-            let xmv12 = fields[34];
             let yy = &fields[36..45]; /* YY[0..8]: reactor A,B,C,D,E,F,G,H,energy */
 
             let registry = StateRegistry::shared();
@@ -552,7 +546,7 @@ mod tests {
             let (temperature, _temperature_k, pressure, volume_liquid, _density, _volume_vapor, _total_vapor_moles, _heat_of_reaction, _liquid_composition, _vapor_composition, _vapor_moles, _reaction_rates) =
                 reactor.__physical_state_impl();
             let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
-            let (_reactor_heat, twr) = reactor.__heat_exchange_impl(volume_liquid, temperature, xmv12, xmv10);
+            let (_reactor_heat, twr) = reactor.__heat_exchange_impl(volume_liquid, temperature, fields[34] /* XMV(12) agitator */);
 
             let temperature_diff = (temperature - xmeas9).abs();
             let pressure_diff = (xmeas_pressure - xmeas7).abs();
@@ -575,13 +569,12 @@ mod tests {
             "\nmax |\u{394}| em 200 ticks: temperatura={max_temperature_diff:.6}\u{b0}C pressao={max_pressure_diff:.6}kPa twr={max_twr_diff:.6}\u{b0}C"
         );
 
-        /* Limiares folgados o bastante pra passar com o ruído de medição do CSV (XMEAS(9) σ=0.01,
-        XMEAS(7) σ=0.3, XMEAS(21) σ=0.01 — Block 37/XNS de `v1.0.0`) mais o efeito não-linear de
-        pequenos erros de entrada se propagando por `uar`/`liquid_density`, mas MUITO abaixo do viés
-        de ~1°C/~0.9kPa que caracterizava o bug real (Exp 23: `REACTOR_COOLING_WATER_INLET` errado).
+        /* Limiares: XMEAS(9) σ=0.01, XMEAS(7) σ=0.3, XMEAS(21) σ=0.01 (Block 37/XNS de `v1.0.0`).
+        `twr` agora é uma constante pura, então seu limiar pode ser bem mais apertado que antes do
+        Exp 24 (era 0.5, folgado pra absorver o viés de fórmula que já não existe mais).
         */
         assert!(
-            max_temperature_diff < 0.05 && max_pressure_diff < 1.0 && max_twr_diff < 0.5,
+            max_temperature_diff < 0.05 && max_pressure_diff < 1.0 && max_twr_diff < 0.1,
             "physical_state()/heat_exchange() nao reproduzem a trajetoria validada dado o MESMO \
             estado de entrada - a formula diverge da fisica correta mesmo fora do ponto nominal \
             (max dT={max_temperature_diff}, max dP={max_pressure_diff}, max dtwr={max_twr_diff})"
