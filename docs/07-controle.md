@@ -281,7 +281,7 @@ Das 12 variáveis manipuladas, apenas 3 estão sob controle automático. As 9 re
 
 **Composição** — nenhuma malha de composição. Os feeds operam em malha aberta. Distúrbios de composição (IDV(1), IDV(2), IDV(8)) propagam sem atenuação até que o efeito apareça em pressão ou nível.
 
-**Compressor** — válvula de reciclo fixa. Variações de carga no compressor (e.g. por IDV(5), IDV(19)) não são compensadas.
+**Compressor** — válvula de reciclo fixa. Variações de carga no compressor (e.g. por IDV(5)) não são compensadas. (IDV(19) não tem fórmula em `teprob.f` — não será implementado, ver `docs/05-disturbios.md`.)
 
 ---
 

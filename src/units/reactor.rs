@@ -256,7 +256,7 @@ impl Reactor {
         */
         let twr = REACTOR_COOLING_WATER_RETURN;
 
-        let reactor_heat = uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0); /* disturbance channel 9 (IDV 10), neutro */
+        let reactor_heat = uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0); /* disturbance channel 9 (IDV 17), neutro */
 
         (reactor_heat, twr)
     }

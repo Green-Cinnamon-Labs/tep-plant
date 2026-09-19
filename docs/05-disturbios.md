@@ -1,6 +1,48 @@
 # Distúrbios do TEP (IDV 1–20)
 
-Referência: Downs & Vogel (1993). Cada IDV é ativado via `active_idv: vec![N]` em `main.rs`.
+Referência: Downs & Vogel (1993), Table 8 (`docs/disturbios_paper.png`). Cada IDV é ativado via
+`active_idv: vec![N]` em `main.rs`.
+
+**Diretriz de implementação (2026-09-19, decisão do usuário, ver #72) — seguir `teprob.f`
+estritamente: onde o FORTRAN implementa algo, implementamos igual; onde não implementa, não
+implementamos.** IDV(1)–(15) abaixo conferem exatamente com a Table 8 do paper original (variável +
+tipo). IDV(16)–(20) são listados no paper como "Unknown"/"Unknown" — mas o `teprob.f` de referência
+não os deixa igualmente em aberto: ele dá fórmula concreta pra 16/17/18/20 (mecânica de canal
+cúbico/pulso, igual a IDV(1)-(13) — ver `state.rs`: canal 8→UAC, canal 9→QUR, canal 10→QUS, canal
+11→coeficiente de vazão) e NENHUMA fórmula pra 19 (nunca referenciado em `IDVWLK` nem em lugar
+nenhum do arquivo). A descrição anterior desta seção pra 16-20 ("válvula travada" em vários XMVs)
+não vinha do paper nem do `teprob.f` — era uma extrapolação não citada de uma sessão anterior.
+Corrigida abaixo: 16/17/18/20 agora refletem a mecânica real de `teprob.f`; 19 fica marcado como
+não-implementado; 14/15 continuam "válvula travada" (isso SIM está no paper, Table 8), mas como
+categoria de mecanismo estruturalmente diferente — ver nota na seção de IDV(14)/(15) abaixo.
+
+## Onde cada distúrbio entra no código (2026-09-19)
+
+Levantamento feito contra `teprob.f` e o código Rust atual — só localização, nenhuma implementação
+feita ainda.
+
+| IDV    | Mecanismo (canal, se houver)                     | Local exato                                              | Nota                                                                                                                             |
+| ------ | ------------------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **1**  | A/C ratio, stream 4 (canal 0/1)                  | `units/feed.rs:31`                                       | onde `FEED_AC_COMPOSITION` é DEFINIDA, não onde é consumida — hoje é `const`, precisaria virar task `#[offer]` (mesmo padrão de `ac_feed_flow` no mesmo arquivo) pra ter algo perturbável |
+| **2**  | B composition, stream 4 (canal 0/1)              | `units/feed.rs:31`                                       | mesmo array/local de IDV(1), componente diferente                                                                                |
+| **3**  | D feed temperature, step (canal 2)               | `units/compressor.rs:163`                                | `FEED_TEMPERATURE` é uma constante ÚNICA reusada por D/E/A/A&C — perturbar só D exige separá-la por stream primeiro              |
+| **4**  | Reactor CW inlet temp, step                      | `units/reactor.rs:245-257` (bloco comentado)             | sem fórmula em `teprob.f` (TCWR nunca é lido por ninguém lá) — reintrodução deliberada, ver #72                                  |
+| **5**  | Condenser CW inlet temp, step                    | `units/separator.rs:142-147`                             | mesma lacuna estrutural do IDV(4), lado separador/condensador — ainda não resolvido explicitamente se reintroduz fórmula própria |
+| **6**  | A feed loss                                      | `units/feed.rs:62`                                       | já tem comentário apontando isso (linha 58)                                                                                      |
+| **7**  | C header pressure loss, stream 4                 | `units/feed.rs:72`                                       | já tem comentário apontando isso (linha 65)                                                                                      |
+| **8**  | A/B/C composition random, stream 4 (canal 0/1)   | `units/feed.rs:31`                                       | mesmo local de IDV(1)/(2), perfil aleatório                                                                                      |
+| **9**  | D feed temperature random (canal 2)              | `units/compressor.rs:163`                                | mesmo local de IDV(3), mesma ressalva do `FEED_TEMPERATURE` compartilhado                                                        |
+| **10** | C feed temperature random (canal 3)              | `units/stripper.rs:185`                                  | mesmo `FEED_TEMPERATURE` compartilhado, lado A&C                                                                                 |
+| **11** | Reactor CW inlet temp random                     | `units/reactor.rs:245-257`                               | mesmo local de IDV(4) — mesma variável (`tcwr`), perfil aleatório                                                                |
+| **12** | Condenser CW inlet temp random                   | `units/separator.rs:142-147`                             | mesmo local de IDV(5)                                                                                                            |
+| **13** | Reaction kinetics R1F/R2F                        | `units/reactor.rs:150` e `:151`                          | constantes hoje em `reactor.rs:9-10` (`REACTION_FACTOR_1/2_NOMINAL`)                                                             |
+| **14** | Reactor CW valve sticking                        | `actuators/reactor_cooling_water.rs` (arquivo inteiro)   | sem ponto de interceptação de `write()` hoje — mecanismo não existe ainda, nem no framework (`#[actuator]` em `monjolo-macros`)  |
+| **15** | Condenser CW valve sticking                      | `actuators/condenser_cooling_water.rs` (arquivo inteiro) | mesma observação do IDV(14)                                                                                                      |
+| **16** | UAC — condenser heat transfer coef. (canal 8)    | `units/stripper.rs:145`                                  | `condenser_ua`                                                                                                                   |
+| **17** | QUR — reactor heat removal (canal 9)             | `units/reactor.rs:259`                                   | já tem placeholder `* (1.0 - 0.35 * 0.0)`, comentário já corrigido                                                               |
+| **18** | QUS — separator heat removal (canal 10)          | `units/separator.rs:144`                                 | placeholder `* (1.0 - 0.25 * 0.0)`                                                                                               |
+| **19** | —                                                | —                                                        | não implementar (sem fórmula em `teprob.f`)                                                                                      |
+| **20** | Coeficiente de vazão reator→separador (canal 11) | `units/reactor.rs:203`                                   | placeholder `* (1.0 - 0.25 * 0.0)`                                                                                               |
 
 ---
 
@@ -15,6 +57,18 @@ Temperatura de alimentação de D sobe em step. D é alimentado como líquido; t
 
 ## IDV(4) — Step: temperatura de entrada da água de resfriamento do reator (+5°C)
 A água de resfriamento do reator entra 5°C mais quente, reduzindo a capacidade de remoção de calor. Tende a elevar a temperatura do reator e deslocar o equilíbrio vapor-líquido. **Foi o distúrbio usado nos Exps 2 e 3 deste projeto (inadvertidamente ativo).**
+
+**Estado atual (2026-09-16): sem efeito nenhum.** IDV(4) perturba `tcwr` (temperatura de ENTRADA da
+água de resfriamento do reator) — mas desde o Exp 24 (`experimentos.md`), `twr` (temperatura de
+RETORNO) é uma constante congelada, `REACTOR_COOLING_WATER_RETURN`, sem depender de `tcwr` nenhum.
+A fórmula quase-estática que ligava os dois (`twr` como média ponderada entre `tcwr` e a temperatura
+do reator, via `uar`/`fcwr`) só existiu historicamente PRA dar a este IDV algum efeito observável
+(introduzida em `123a6a3`, 2026-05-27, especificamente por causa disso) — e foi revertida duas vezes
+por instabilidade térmica real (colapso de `twr`→~35°C em 2026-03; `QUR<0` quando `tcr`<~67°C em
+2026-06), até ser congelada de vez no Exp 24. Dar efeito real a este IDV exige reintroduzir essa
+fórmula — desta vez com uma malha de controle de água de resfriamento do reator adequada, que nenhuma
+das três tentativas anteriores tinha. Rastreado na epic #71; não é pra ser resolvido silenciosamente
+como "sem efeito, fim de história" só porque as tentativas anteriores desestabilizaram o reator.
 
 ## IDV(5) — Step: temperatura de entrada da água de resfriamento do condensador (+5°C)
 Mesmo mecanismo do IDV(4), mas no condensador do separador. Reduz a condensação no separador, aumenta a fração de vapor no reciclo e eleva a carga sobre o compressor.
@@ -37,6 +91,9 @@ Ruído randômico na temperatura de C na alimentação combinada A&C. Análogo a
 ## IDV(11) — Aleatório: variação na temperatura de entrada da água de resfriamento do reator
 Flutuação contínua na temperatura de entrada do CW do reator. Torna o controle de temperatura do reator inerentemente mais difícil — o controlador de CW precisa compensar uma perturbação de entrada variável.
 
+**Estado atual (2026-09-16): sem efeito nenhum, mesmo motivo do IDV(4)** — mesma variável (`tcwr`),
+mesma fórmula `twr` congelada sem dependência dela. Ver nota em IDV(4) acima.
+
 ## IDV(12) — Aleatório: variação na temperatura de entrada da água de resfriamento do condensador
 Análogo ao IDV(11) para o condensador. Afeta a eficiência de separação e a temperatura do separador (XMEAS(11)).
 
@@ -49,17 +106,43 @@ A válvula de água de resfriamento do reator trava em sua posição atual. O co
 ## IDV(15) — Válvula travada: CW do condensador (XMV(11))
 A válvula de resfriamento do condensador trava. A capacidade de condensação no separador fica fixa independentemente da demanda. Com variações de carga, o separador superaquece ou superesfria.
 
-## IDV(16) — Válvula travada: D feed (XMV(1))
-A válvula de alimentação de D trava. O feed de D fica fixo no valor do instante do travamento, independente de qualquer ação de controle.
+**Mecanismo de IDV(14)/(15) — categoria estruturalmente diferente de todos os outros IDVs desta
+lista.** `teprob.f` linha 97 diz explicitamente que IDV(14)-(20) "do NOT require coupling" na
+física — nenhuma fórmula em `TEFUNC` os referencia. Pra 14/15 especificamente, isso significa: não
+é um VALOR sendo perturbado (não há canal cúbico, não há `TESUB8`/`IDVWLK` envolvido), é o
+`Actuator` correspondente que precisa parar de responder a `write()` — a posição da válvula
+congela no valor de quando o distúrbio foi ativado, e qualquer comando novo do controlador é
+ignorado até o distúrbio ser desativado. Isso não se implementa como "mais um canal de
+distúrbio" — é um comportamento de ATUADOR (um decorator/wrapper sobre `Actuator::write()`), não
+do componente `Disturbance`. IDV(16)-(20) abaixo, apesar de também estarem na faixa "Unknown" do
+paper, NÃO seguem este mecanismo — `teprob.f` os implementa (onde implementa) como perturbação de
+valor, igual a IDV(1)-(13).
 
-## IDV(17) — Válvula travada: C feed / A&C feed (XMV(4))
-A válvula de alimentação A&C trava. Afeta diretamente os dois reagentes principais A e C, tornando impossível ajustar a estequiometria via controle de feed.
+## IDV(16) — Aleatório (canal cúbico contínuo): coeficiente de troca térmica do condensador (UAC)
+`teprob.f`: `UAC = VPOS(9)*VRNG(9)*(1 + TESUB8(9,TIME))/100` — perturbação multiplicativa sobre o
+coeficiente de troca térmica do condensador, derivado da posição de válvula. Canal 8 (0-indexado)
+de `TepDisturbanceState`, mesma mecânica de canal cúbico contínuo (Block 9) usada por IDV(1)-(3)/
+(8)-(10). Sem consumidor no port Rust ainda (`UAC`/condensador não publica esse coeficiente hoje).
 
-## IDV(18) — Válvula travada: A feed (XMV(3))
-A válvula de A feed trava. Combinado com uma malha de controle que tenta ajustar A feed para controlar nível ou composição, resulta em integrador windup.
+## IDV(17) — Aleatório (canal de pulso): remoção de calor do reator (QUR)
+`teprob.f`: `QUR = UAR*(TWR-TCR)*(1 - 0.35*TESUB8(10,TIME))` — perturbação multiplicativa sobre a
+taxa de remoção de calor do reator. Canal 9 (0-indexado), mecânica de pulso/duração aleatória
+(Block 10, diferente do canal cúbico contínuo de 16). **Já tem um placeholder no código** —
+`reactor.rs`, `heat_exchange()`: `uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0)`, o `0.0`
+é onde este canal entra.
 
-## IDV(19) — Válvula travada: válvula de reciclo do compressor (XMV(5))
-A válvula de reciclo do compressor trava. O operador perde controle sobre o bypass do compressor, afetando a pressão de sucção e a vazão do loop de reciclo.
+## IDV(18) — Aleatório (canal de pulso): remoção de calor do separador/condensador (QUS)
+`teprob.f`: `QUS = UAS*(TWS-TST(8))*(1 - 0.25*TESUB8(11,TIME))` — mesma mecânica de IDV(17)
+(Block 10, canal 10), aplicada à troca térmica do separador em vez do reator.
 
-## IDV(20) — Válvula travada: válvula de produto do stripper (XMV(8))
-A válvula de produto final trava. A remoção de produto G/H fica fixa, levando a acúmulo ou escassez de produto no stripper dependendo da taxa de produção no reator.
+## IDV(19) — Não implementado (sem fórmula em `teprob.f`)
+Nunca referenciado em `IDVWLK` nem em nenhuma fórmula de `TEFUNC` no `teprob.f` de referência —
+ao contrário de 16/17/18/20, que o FORTRAN de fato implementa apesar de rotulados "Unknown" no
+paper, 19 fica genuinamente sem definição em nenhuma fonte primária disponível. Diretriz (2026-09-19):
+não implementar — não inventar um mecanismo pra ele.
+
+## IDV(20) — Aleatório (canal de pulso): coeficiente de vazão pro separador
+`teprob.f`, Block 23: multiplicador `(1 - 0.25*TESUB8(12,TIME))` sobre o cálculo de vazão de vapor
+reator→separador. Canal 11 (0-indexado), mecânica de pulso (Block 10, igual 17/18). **Já tem um
+placeholder no código** — `reactor.rs`, `flow_to_separator()`: `... * (1.0 - 0.25 * 0.0) / mol_weight`,
+o `0.0` é onde este canal entra.
