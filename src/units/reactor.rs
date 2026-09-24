@@ -1,11 +1,23 @@
 /* tep/units/reactor.rs */
 
-use crate::physics::constants::TepConstants;
-use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
+use crate::physics::constants::{TepConstants, TEP_SPECIES};
+use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture, Phase, Reaction, ReactionScheme};
 
 const REACTOR_VOLUME: f64 = 1300.0; /* volume total do vaso do reator [m³] */
 const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
-const REACTION_ENTHALPIES: [f64; 2] = [0.06899381054, 0.05]; /* calor das reações 1 e 2 [kJ/kmol] */
+/* As 4 reações do TEP sobre A..H (índices 0..7): estequiometria por kmol de avanço e calor liberado
+[kJ/kmol]. Só as reações 1 e 2 liberam calor no modelo original (teprob.f).
+  1: A + C + D → G   2: A + C + E → H   3: A + E → F   4: 1,5 D → F
+*/
+const TEP_REACTIONS: ReactionScheme<8, 4> = ReactionScheme {
+    stoichiometry: [
+        [-1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 1.0, 0.0],
+        [-1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 0.0, 1.0],
+        [-1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0, -1.5, 0.0, 1.0, 0.0, 0.0],
+    ],
+    enthalpies: [0.06899381054, 0.05, 0.0, 0.0],
+};
 const REACTION_FACTOR_1_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
 const REACTION_FACTOR_2_NOMINAL: f64 = 1.0; /* TODO: devia ser um `need` do Disturbance (IDV 13) */
 const TEMPERATURE_SEED: f64 = 120.0; /* seed do Newton-Raphson — não afeta a raiz */
@@ -45,6 +57,36 @@ essa fórmula.
 */
 const REACTOR_COOLING_WATER_RETURN: f64 = 94.59927549;
 
+/* Cinética de Arrhenius — taxa bruta de cada uma das 4 reações de `TEP_REACTIONS`, dadas a
+temperatura e as pressões parciais. A estequiometria (quem consome/produz o quê) e o calor total
+ficam por conta do próprio `Reaction`, não de quem chama.
+*/
+fn kinetics(temperature_k: f64, partial_pressures: &Mixture<8>, volume_vapor: f64) -> Reaction<8, 4> {
+    let p = |i: usize| partial_pressures.component(i);
+
+    let mut rates = [0.0f64; 4];
+    rates[0] = (31.5859536 - 40000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_1_NOMINAL;
+    rates[1] = (3.00094014 - 20000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_2_NOMINAL;
+    rates[2] = (53.4060443 - 60000.0 / 1.987 / temperature_k).exp();
+    rates[3] = rates[2] * 0.767488334;
+    if p(0) > 0.0 && p(2) > 0.0 {
+        let rf1 = p(0).powf(1.1544);
+        let rf2 = p(2).powf(0.3735);
+        rates[0] *= rf1 * rf2 * p(3);
+        rates[1] *= rf1 * rf2 * p(4);
+    } else {
+        rates[0] = 0.0;
+        rates[1] = 0.0;
+    }
+    rates[2] *= p(0) * p(4);
+    rates[3] *= p(0) * p(3);
+    for r in rates.iter_mut() {
+        *r *= volume_vapor;
+    }
+
+    Reaction::new(rates, &TEP_REACTIONS)
+}
+
 /** Quinta e última unidade migrada pro scheduler de dataflow topológico (issue 10) — fecha a
 migração. Absorve de `flows.rs`: Block 22 (AGSP/agitation_factor — fundido direto em `heat`, sem
 publicar chave própria, mesmo tratamento de `condenser_ua` em `units::stripper`) e Block 23
@@ -75,143 +117,56 @@ pub struct Reactor {
     #[offer(key = "reactor.state.enthalpy")]
     enthalpy: f64,
 
-    /* Prova de conceito: `#[need]` já funciona em CAMPO de struct, não só em parâmetro de task —
-    resolvido uma vez em `Reactor::new()`, exposto como `self.agitator_speed()` pra QUALQUER método
-    do `impl` abaixo, sem precisar redeclarar `#[need(key = "agitator.speed")]` em cada um. Só
-    seguro fazer isso quando quem oferece a chave é uma unidade DIFERENTE (aqui, o atuador
-    `Agitator`) — se fosse uma chave oferecida por outra TASK deste mesmo `Reactor`, isso criaria um
-    ciclo de construção (o struct precisaria da task, a task precisa do struct já construído).
-    */
-    /** Temperatura do vapor de reciclo do compressor (°C) — usada no balanço de entalpia do reator. */
-    #[need(key = "agitator.speed")]
-    agitator_speed: f64,
-
     constants: TepConstants,
 }
 
-#[monjolo::tasks]
+/* Os sinais (`need::nome` lido, `offer::nome = valor;` escrito) moram dentro de cada método — o nome
+é a chave, `__` vira `.` (`reactor__temperature` = "reactor.temperature"). Uma mistura
+(`::<Vapor>`) é UM valor, publicado como 8 chaves `.a`..`.h`.
+*/
+#[monjolo::tasks(species = TEP_SPECIES, len = 8)]
 impl Reactor {
-    
     /* Bloco 1: balanço de energia próprio → temperatura/pressão/composição/cinética — igual ao
-        `compute()` monolítico de antes. Sem `#[need]` nenhum: só lê o próprio `#[state]`.
+    `compute()` monolítico de antes. Não lê nenhum `need::`: só o próprio `#[state]`.
     */
-    #[offer(key = "reactor.temperature")]
-    #[offer(key = "reactor.temperature_k")]
-    #[offer(key = "reactor.pressure")]
-    #[offer(key = "reactor.liquid_volume")]
-    #[offer(key = "reactor.liquid_density")]
-    #[offer(key = "reactor.vapor_volume")]
-    #[offer(key = "reactor.total_vapor_kmol")]
-    #[offer(key = "reactor.heat_of_reaction")]
-    #[offer(prefix = "reactor.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[offer(prefix = "reactor.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[offer(prefix = "reactor.vapor_kmol", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[offer(prefix = "reactor.reaction_rates", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[allow(clippy::type_complexity)]
-    fn physical_state(&self) -> (f64, f64, f64, f64, f64, f64, f64, f64, [f64; 8], [f64; 8], [f64; 8], [f64; 8]) {
-        
-        let vapor_group = self.vapor();
-        let liquid_group = self.liquid();
+    #[task]
+    fn physical_state(&self) {
+        /* `vapor()`/`liquid()` são os dois grupos do estado (A/B/C e D-H, separados só pela chave de
+        config); `Mixture::at` posiciona cada um no seu lugar de um total de 8, zero no resto.
+        */
+        let vapor = Mixture::at(0, &self.vapor(), Phase::Vapor, &TEP_SPECIES);
+        let liquid = Mixture::at(3, &self.liquid(), Phase::Liquid, &TEP_SPECIES);
+        let liquid_composition = liquid.mole_fractions();
 
-        let mut vapor_moles = [0.0f64; 8]; /* kmol A,B,C na fase vapor (estado) */
-        let mut liquid_moles = [0.0f64; 8]; /* kmol D,E,F,G,H na fase líquida (estado) */
-        for i in 0..3 {
-            vapor_moles[i] = vapor_group[i];
-        }
-        for i in 3..8 {
-            liquid_moles[i] = liquid_group[i - 3];
-        }
-        let total_enthalpy = self.enthalpy();
-
-        let total_liquid_moles: f64 = liquid_moles.iter().sum();
-        let mut liquid_composition = [0.0f64; 8];
-        for i in 0..8 {
-            liquid_composition[i] = liquid_moles[i] / total_liquid_moles;
-        }
-
-        let specific_enthalpy = total_enthalpy / total_liquid_moles;
-        let temperature = temperature_from_enthalpy(&liquid_composition, TEMPERATURE_SEED, specific_enthalpy, 0, &self.constants);
+        let specific_enthalpy = self.enthalpy() / liquid.total();
+        let temperature = temperature_from_enthalpy(&liquid_composition.as_array(), TEMPERATURE_SEED, specific_enthalpy, 0, &self.constants);
         let temperature_k = temperature + 273.15;
-        let density = liquid_density(&liquid_composition, temperature, &self.constants);
-        let volume_liquid = total_liquid_moles / density;
+        let density = liquid_density(&liquid_composition.as_array(), temperature, &self.constants);
+        let volume_liquid = liquid.total() / density;
         let volume_vapor = REACTOR_VOLUME - volume_liquid;
 
-        let mut partial_pressures = [0.0f64; 8];
-        let mut pressure = 0.0f64;
-        for i in 0..3 {
-            partial_pressures[i] = vapor_moles[i] * GAS_CONSTANT * temperature_k / volume_vapor;
-            pressure += partial_pressures[i];
-        }
-        for i in 3..8 {
-            partial_pressures[i] = (self.constants.avp[i] + self.constants.bvp[i] / (temperature + self.constants.cvp[i])).exp() * liquid_composition[i];
-            pressure += partial_pressures[i];
-        }
+        /* A/B/C: gás ideal a partir dos moles de vapor; D-H: Antoine × fração líquida. Cada `Mixture`
+        só é não-zero na própria faixa de índices, então `+` já junta as duas.
+        */
+        let partial_pressures = vapor.ideal_gas_pressure(temperature_k, volume_vapor, GAS_CONSTANT) + liquid_composition.vapor_pressure(temperature, &self.constants);
+        let pressure = partial_pressures.total();
+        let vapor_composition = partial_pressures.mole_fractions();
 
-        let mut vapor_composition = [0.0f64; 8];
-        for i in 0..8 {
-            vapor_composition[i] = partial_pressures[i] / pressure;
-        }
-        let total_vapor_moles = pressure * volume_vapor / GAS_CONSTANT / temperature_k;
-        for i in 3..8 {
-            vapor_moles[i] = total_vapor_moles * vapor_composition[i];
-        }
+        let reaction = kinetics(temperature_k, &partial_pressures, volume_vapor);
 
-        /* Cinética de Arrhenius — taxas brutas das 4 reações */
-        let mut rates = [0.0f64; 4];
-        rates[0] = (31.5859536 - 40000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_1_NOMINAL;
-        rates[1] = (3.00094014 - 20000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_2_NOMINAL;
-        rates[2] = (53.4060443 - 60000.0 / 1.987 / temperature_k).exp();
-        rates[3] = rates[2] * 0.767488334;
-        if partial_pressures[0] > 0.0 && partial_pressures[2] > 0.0 {
-            let rf1 = partial_pressures[0].powf(1.1544);
-            let rf2 = partial_pressures[2].powf(0.3735);
-            rates[0] *= rf1 * rf2 * partial_pressures[3];
-            rates[1] *= rf1 * rf2 * partial_pressures[4];
-        } else {
-            rates[0] = 0.0;
-            rates[1] = 0.0;
-        }
-        rates[2] *= partial_pressures[0] * partial_pressures[4];
-        rates[3] *= partial_pressures[0] * partial_pressures[3];
-        for r in rates.iter_mut() {
-            *r *= volume_vapor;
-        }
-
-        /* Estequiometria: consumo/produção por componente */
-        let mut reaction_rates = [0.0f64; 8];
-        reaction_rates[0] = -rates[0] - rates[1] - rates[2];
-        reaction_rates[2] = -rates[0] - rates[1];
-        reaction_rates[3] = -rates[0] - 1.5 * rates[3];
-        reaction_rates[4] = -rates[1] - rates[2];
-        reaction_rates[5] = rates[2] + rates[3];
-        reaction_rates[6] = rates[0];
-        reaction_rates[7] = rates[1];
-        let heat_of_reaction = rates[0] * REACTION_ENTHALPIES[0] + rates[1] * REACTION_ENTHALPIES[1];
-
-        (
-            temperature,
-            temperature_k,
-            pressure,
-            volume_liquid,
-            density,
-            volume_vapor,
-            total_vapor_moles,
-            heat_of_reaction,
-            liquid_composition,
-            vapor_composition,
-            vapor_moles,
-            reaction_rates,
-        )
+        offer::reactor__temperature = temperature;
+        offer::reactor__pressure = pressure;
+        offer::reactor__liquid_volume = volume_liquid;
+        offer::reactor__heat_of_reaction = reaction.heat();
+        offer::reactor__vapor_composition::<Vapor> = vapor_composition;
+        offer::reactor__reaction_rates::<Mixed> = Mixture::new(reaction.species_rates(), Phase::Mixed, &TEP_SPECIES);
     }
 
     /* Bloco 2 (ex-Flows, Block 23 slot 7): vazão pro separador, dependente de ΔP (sem válvula). */
-    #[need(key = "reactor.pressure")]
-    #[need(prefix = "reactor.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[need(key = "separator.pressure")]
-    #[offer(key = "flows.stream_flow.7")]
-    fn flow_to_separator(&self, own_pressure: f64, own_vapor: [f64; 8], separator_pressure: f64) -> f64 {
-        let mol_weight: f64 = (0..8).map(|i| own_vapor[i] * self.constants.xmw[i]).sum();
-        4574.21 * (own_pressure - separator_pressure).max(0.0).sqrt() * (1.0 - 0.25 * 0.0) / mol_weight /* disturbance channel 11, neutro */
+    #[task]
+    fn flow_to_separator(&self) {
+        let mol_weight = need::reactor__vapor_composition::<Vapor>.dot(&self.constants.xmw);
+        offer::flows__stream_flow__7 = 4574.21 * (need::reactor__pressure - need::separator__pressure).max(0.0).sqrt() * (1.0 - 0.25 * 0.0) / mol_weight /* disturbance channel 11, neutro */;
     }
 
     /* Bloco 3 (ex-Heat, Block 32 + o AGSP de Block 22, que nunca teve dono além de ser consumido
@@ -232,18 +187,14 @@ impl Reactor {
     water.position` deixa de ser um `#[need]` daqui (não afeta esta física, mesma conclusão a que o
     projeto já tinha chegado em 2026-03/2026-06 e que só não tinha sido reaplicada aqui).
     */
-    #[need(key = "reactor.liquid_volume")]
-    #[need(key = "reactor.temperature")]
-    #[offer(key = "heat.reactor_heat")]
-    #[offer(key = "heat.reactor_cooling_water_return")]
-    fn heat_exchange(&self, reactor_liquid_volume: f64, reactor_temperature: f64) -> (f64, f64) {
+    #[task]
+    fn heat_exchange(&self) {
         /* UARLEV: fração da serpentina submersa, 0 abaixo de level=10 (seca, sem troca), rampa
         linear até level=50, platô em 1.0 dali pra cima (totalmente submersa — mais líquido não
-        aumenta mais nada). `self.agitator_speed()` vem do campo do struct (acima), não de um
-        `#[need]` local a este método.
+        aumenta mais nada).
         */
-        let agitation_factor = (self.agitator_speed() + 150.0) / 100.0;
-        let level = reactor_liquid_volume / 7.8; /* 7.8 = fator de conversão de volume pra "nível" deste bloco */
+        let agitation_factor = (need::agitator__speed + 150.0) / 100.0;
+        let level = need::reactor__liquid_volume / 7.8; /* 7.8 = fator de conversão de volume pra "nível" deste bloco */
         let uar_level = if level > 50.0 {
             1.0
         } else if level < 10.0 {
@@ -267,56 +218,34 @@ impl Reactor {
         */
         let twr = REACTOR_COOLING_WATER_RETURN;
 
-        let reactor_heat = uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0); /* disturbance channel 9 (IDV 17), neutro */
-
-        (reactor_heat, twr)
+        offer::heat__reactor_heat = uar * (twr - need::reactor__temperature) * (1.0 - 0.35 * 0.0) /* disturbance channel 9 (IDV 17), neutro */;
+        offer::heat__reactor_cooling_water_return = twr;
     }
 
     /* Bloco 4 (ex-Derivatives, Block 40 YP(1..9)): balanço de massa/energia do próprio estado —
     a última EDO que faltava. Entalpias recomputadas frescas, mesmo padrão das outras 3 unidades.
     */
-    #[need(prefix = "compressor.vapor_composition", components = ["0", "1", "2", "3", "4", "5", "6", "7"])]
-    #[need(key = "compressor.temperature")]
-    #[need(key = "flows.stream_flow.6")]
-    #[need(key = "flows.stream_flow.7")]
-    #[need(prefix = "reactor.vapor_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[need(key = "reactor.temperature")]
-    #[need(prefix = "reactor.reaction_rates", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[need(key = "reactor.heat_of_reaction")]
-    #[need(key = "heat.reactor_heat")]
-    #[offer(prefix = "reactor.state", components = ["vapor_a.derivative", "vapor_b.derivative", "vapor_c.derivative"])]
-    #[offer(prefix = "reactor.state", components = ["liquid_d.derivative", "liquid_e.derivative", "liquid_f.derivative", "liquid_g.derivative", "liquid_h.derivative"])]
-    #[offer(key = "reactor.state.enthalpy.derivative")]
-    #[allow(clippy::too_many_arguments)]
-    fn mass_and_energy_balance(
-        &self,
-        compressor_vapor: [f64; 8],
-        compressor_temperature: f64,
-        compressor_recycle_flow: f64,
-        outlet_flow: f64,
-        reactor_vapor: [f64; 8],
-        reactor_temperature: f64,
-        reaction_rates: [f64; 8],
-        heat_of_reaction: f64,
-        reactor_heat: f64,
-    ) -> ([f64; 3], [f64; 5], f64) {
-        let enthalpy_compressor_recycle = mixture_enthalpy(&compressor_vapor, compressor_temperature, 1, &self.constants);
-        let enthalpy_reactor_outlet = mixture_enthalpy(&reactor_vapor, reactor_temperature, 1, &self.constants);
+    #[task]
+    fn mass_and_energy_balance(&self) {
+        let compressor_vapor = need::compressor__vapor_composition::<Vapor>;
+        let reactor_vapor = need::reactor__vapor_composition::<Vapor>;
+        let compressor_recycle_flow = need::flows__stream_flow__6;
+        let outlet_flow = need::flows__stream_flow__7;
 
-        let mut vapor_derivative = [0.0f64; 3];
-        let mut liquid_derivative = [0.0f64; 5];
-        for i in 0..8 {
-            let value = compressor_vapor[i] * compressor_recycle_flow - reactor_vapor[i] * outlet_flow + reaction_rates[i];
-            if i < 3 {
-                vapor_derivative[i] = value;
-            } else {
-                liquid_derivative[i - 3] = value;
-            }
-        }
-        let enthalpy_derivative =
-            enthalpy_compressor_recycle * compressor_recycle_flow - enthalpy_reactor_outlet * outlet_flow + heat_of_reaction + reactor_heat;
+        let derivative = compressor_vapor.scaled_by(compressor_recycle_flow) - reactor_vapor.scaled_by(outlet_flow) + need::reactor__reaction_rates::<Mixed>;
 
-        (vapor_derivative, liquid_derivative, enthalpy_derivative)
+        offer::reactor__state__vapor_a__derivative = derivative.component(0);
+        offer::reactor__state__vapor_b__derivative = derivative.component(1);
+        offer::reactor__state__vapor_c__derivative = derivative.component(2);
+        offer::reactor__state__liquid_d__derivative = derivative.component(3);
+        offer::reactor__state__liquid_e__derivative = derivative.component(4);
+        offer::reactor__state__liquid_f__derivative = derivative.component(5);
+        offer::reactor__state__liquid_g__derivative = derivative.component(6);
+        offer::reactor__state__liquid_h__derivative = derivative.component(7);
+        offer::reactor__state__enthalpy__derivative = compressor_vapor.enthalpy(need::compressor__temperature, 1, &self.constants) * compressor_recycle_flow
+            - reactor_vapor.enthalpy(need::reactor__temperature, 1, &self.constants) * outlet_flow
+            + need::reactor__heat_of_reaction
+            + need::heat__reactor_heat;
     }
 
     /* Bloco 5 (ex-measured.rs, Block 35): XMEAS 7-9 (pressão/nível/temperatura do reator) + XMEAS
@@ -324,27 +253,33 @@ impl Reactor {
     original: (P-760)/760*101.325 (mmHg gauge → kPa gauge), volume/666.7*100 (calibração do
     instrumento de nível).
     */
-    #[need(key = "reactor.pressure")]
-    #[need(key = "reactor.liquid_volume")]
-    #[need(key = "reactor.temperature")]
-    #[need(key = "heat.reactor_cooling_water_return")]
-    #[offer(key = "xmeas.reactor.pressure")]
-    #[offer(key = "xmeas.reactor.level")]
-    #[offer(key = "xmeas.reactor.temperature")]
-    #[offer(key = "xmeas.reactor.cooling_water_outlet_temperature")]
-    fn xmeas_readings(&self, pressure: f64, liquid_volume: f64, temperature: f64, cooling_water_return: f64) -> (f64, f64, f64, f64) {
-        let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
-        let xmeas_level = (liquid_volume - 84.6) / 666.7 * 100.0;
-
-        (xmeas_pressure, xmeas_level, temperature, cooling_water_return)
+    #[task]
+    fn xmeas_readings(&self) {
+        offer::xmeas__reactor__pressure = (need::reactor__pressure - 760.0) / 760.0 * 101.325;
+        offer::xmeas__reactor__level = (need::reactor__liquid_volume - 84.6) / 666.7 * 100.0;
+        offer::xmeas__reactor__temperature = need::reactor__temperature;
+        offer::xmeas__reactor__cooling_water_outlet_temperature = need::heat__reactor_cooling_water_return;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::units::harness::Harness;
     use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::StateRegistry;
+
+    const NOMINAL_STATE: [(&str, f64); 9] = [
+        ("state.reactor_vapor.A", 10.679592788064898),
+        ("state.reactor_vapor.B", 4.666690921054032),
+        ("state.reactor_vapor.C", 7.668821577187304),
+        ("state.reactor_vapor.D", 0.3968744850195289),
+        ("state.reactor_vapor.E", 22.74175383132296),
+        ("state.reactor_vapor.F", 2.9441162740614635),
+        ("state.reactor_vapor.G", 148.4668245572372),
+        ("state.reactor_vapor.H", 153.02693445529974),
+        ("state.reactor.energy", 2.6983891373872186),
+    ];
 
     #[test]
     fn new_seeds_own_state_with_initial_condition() {
@@ -390,22 +325,16 @@ mod tests {
     */
     #[test]
     fn physical_state_matches_nominal_operating_point_from_application_toml() {
-        let registry = StateRegistry::shared();
-        let initial = Snapshot::from_pairs(&[
-            ("state.reactor_vapor.A", 10.679592788064898),
-            ("state.reactor_vapor.B", 4.666690921054032),
-            ("state.reactor_vapor.C", 7.668821577187304),
-            ("state.reactor_vapor.D", 0.3968744850195289),
-            ("state.reactor_vapor.E", 22.74175383132296),
-            ("state.reactor_vapor.F", 2.9441162740614635),
-            ("state.reactor_vapor.G", 148.4668245572372),
-            ("state.reactor_vapor.H", 153.02693445529974),
-            ("state.reactor.energy", 2.6983891373872186),
-        ]);
+        let harness = Harness::new();
+        let _reactor = harness.unit(|registry| Reactor::new(registry, &Snapshot::from_pairs(&NOMINAL_STATE)));
+        let task = harness.task("Reactor::physical_state");
+        harness.resolve();
+        task.evaluate();
 
-        let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
-        let (temperature, _temperature_k, pressure, _volume_liquid, _density, _volume_vapor, _total_vapor_moles, heat_of_reaction, _liquid_composition, _vapor_composition, _vapor_moles, reaction_rates) =
-            reactor.__physical_state_impl();
+        let temperature = harness.read("reactor.temperature");
+        let pressure = harness.read("reactor.pressure");
+        let heat_of_reaction = harness.read("reactor.heat_of_reaction");
+        let reaction_rates = harness.read_mixture("reactor.reaction_rates", 8);
 
         /* Nominal documentado (Exp 3/10/11/13, te_exp3_snapshot.toml): ~120°C, XMEAS(7) ~2695-2705
         kPa. Faixas com folga generosa — o objetivo é pegar um colapso grosseiro (dezenas de graus/
@@ -443,7 +372,33 @@ mod tests {
         );
     }
 
-    /* `mass_and_energy_balance` consome os outputs de `physical_state`/`heat_exchange`/fluxos de
+    /* Semeia todas as entradas de `mass_and_energy_balance` com fluxos BALANCEADOS (mesma
+    composição/temperatura/vazão entrando e saindo) e roda a tarefa. */
+    fn run_balanced_mass_and_energy_balance(reaction_rates: [f64; 8], heat_of_reaction: f64, reactor_heat: f64) -> Harness {
+        let harness = Harness::new();
+        let _reactor = harness.unit(|registry| Reactor::new(registry, &Snapshot::from_pairs(&[])));
+
+        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
+        let temperature = 120.0;
+        let flow = 500.0;
+
+        harness.seed_mixture("compressor.vapor_composition", &composition);
+        harness.seed("compressor.temperature", temperature);
+        harness.seed("flows.stream_flow.6", flow);
+        harness.seed("flows.stream_flow.7", flow);
+        harness.seed_mixture("reactor.vapor_composition", &composition);
+        harness.seed("reactor.temperature", temperature);
+        harness.seed_mixture("reactor.reaction_rates", &reaction_rates);
+        harness.seed("reactor.heat_of_reaction", heat_of_reaction);
+        harness.seed("heat.reactor_heat", reactor_heat);
+
+        let task = harness.task("Reactor::mass_and_energy_balance");
+        harness.resolve();
+        task.evaluate();
+        harness
+    }
+
+    /* `mass_and_energy_balance` consome os sinais de `physical_state`/`heat_exchange`/fluxos de
     outras unidades — testado aqui com entradas balanceadas (mesma composição/temperatura/vazão
     entrando e saindo) pra confirmar que os termos de fluxo se cancelam exatamente, sobrando só
     reação/calor. Não depende de nenhum valor "nominal" hipotético — é uma verificação estrutural
@@ -451,60 +406,51 @@ mod tests {
     */
     #[test]
     fn mass_and_energy_balance_cancels_flow_terms_when_inflow_equals_outflow() {
-        let registry = StateRegistry::shared();
-        let reactor = Reactor::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+        let harness = run_balanced_mass_and_energy_balance([0.0; 8], 0.0, 0.0);
 
-        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
-        let temperature = 120.0;
-        let flow = 500.0;
-
-        let (vapor_derivative, liquid_derivative, enthalpy_derivative) = reactor.__mass_and_energy_balance_impl(
-            composition,
-            temperature,
-            flow,
-            flow,
-            composition,
-            temperature,
-            [0.0; 8],
+        for key in [
+            "reactor.state.vapor_a.derivative",
+            "reactor.state.vapor_b.derivative",
+            "reactor.state.vapor_c.derivative",
+            "reactor.state.liquid_d.derivative",
+            "reactor.state.liquid_e.derivative",
+            "reactor.state.liquid_f.derivative",
+            "reactor.state.liquid_g.derivative",
+            "reactor.state.liquid_h.derivative",
+        ] {
+            assert_eq!(harness.read(key), 0.0, "mesma composição/vazão entrando e saindo não deveria acumular nada em {key}");
+        }
+        assert_eq!(
+            harness.read("reactor.state.enthalpy.derivative"),
             0.0,
-            0.0,
+            "mesma composição/temperatura/vazão não deveria gerar entalpia líquida"
         );
-
-        assert_eq!(vapor_derivative, [0.0; 3], "mesma composição/vazão entrando e saindo não deveria acumular nada");
-        assert_eq!(liquid_derivative, [0.0; 5], "mesma composição/vazão entrando e saindo não deveria acumular nada");
-        assert_eq!(enthalpy_derivative, 0.0, "mesma composição/temperatura/vazão não deveria gerar entalpia líquida");
     }
 
     #[test]
     fn mass_and_energy_balance_passes_through_reaction_and_heat_when_flows_are_balanced() {
-        let registry = StateRegistry::shared();
-        let reactor = Reactor::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
-
-        let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
-        let temperature = 120.0;
-        let flow = 500.0;
         let reaction_rates = [-3.0, 0.0, -2.0, -1.5, -1.0, 1.5, 2.0, 1.0];
         let heat_of_reaction = 10.0;
         let reactor_heat = -4.0;
-
-        let (vapor_derivative, liquid_derivative, enthalpy_derivative) = reactor.__mass_and_energy_balance_impl(
-            composition,
-            temperature,
-            flow,
-            flow,
-            composition,
-            temperature,
-            reaction_rates,
-            heat_of_reaction,
-            reactor_heat,
-        );
+        let harness = run_balanced_mass_and_energy_balance(reaction_rates, heat_of_reaction, reactor_heat);
 
         /* Com os fluxos cancelados, a derivada de cada componente É a taxa de reação — sem
-        surpresa de índice trocado entre vapor_derivative (0..3) e liquid_derivative (3..8).
+        surpresa de índice trocado entre as derivadas de vapor (0..3) e de líquido (3..8).
         */
-        assert_eq!(vapor_derivative, [reaction_rates[0], reaction_rates[1], reaction_rates[2]]);
-        assert_eq!(liquid_derivative, [reaction_rates[3], reaction_rates[4], reaction_rates[5], reaction_rates[6], reaction_rates[7]]);
-        assert_eq!(enthalpy_derivative, heat_of_reaction + reactor_heat);
+        let derivative_keys = [
+            "reactor.state.vapor_a.derivative",
+            "reactor.state.vapor_b.derivative",
+            "reactor.state.vapor_c.derivative",
+            "reactor.state.liquid_d.derivative",
+            "reactor.state.liquid_e.derivative",
+            "reactor.state.liquid_f.derivative",
+            "reactor.state.liquid_g.derivative",
+            "reactor.state.liquid_h.derivative",
+        ];
+        for (i, key) in derivative_keys.iter().enumerate() {
+            assert_eq!(harness.read(key), reaction_rates[i], "derivada de {key} deveria ser a taxa de reação");
+        }
+        assert_eq!(harness.read("reactor.state.enthalpy.derivative"), heat_of_reaction + reactor_heat);
     }
 
     /** Experimento 23/24 (spec-tennessee-eastman/experimentos.md). O Exp 19 provou que
@@ -540,16 +486,6 @@ mod tests {
             let xmeas21 = fields[21];
             let yy = &fields[36..45]; /* YY[0..8]: reactor A,B,C,D,E,F,G,H,energy */
 
-            let registry = StateRegistry::shared();
-            /* `agitator.speed` agora é um `#[need]` de CAMPO do struct (não mais parâmetro de
-            `heat_exchange`) — precisa de um ofertante de verdade + `resolve()`, não dá mais pra
-            simplesmente passar `fields[34]` como argumento solto. Ofertado ANTES de `Reactor::new()`
-            só por legibilidade — ordem não importa (Art. 6.3: precisa vem antes ou depois do oferece
-            sem diferença, `resolve()` casa os dois no final de qualquer forma).
-            */
-            let (agitator_speed_offered, _) = registry.borrow_mut().subscribe(&["agitator.speed"], &[]);
-            agitator_speed_offered[0].set(fields[34] /* XMV(12) agitator */);
-
             let initial = Snapshot::from_pairs(&[
                 ("state.reactor_vapor.A", yy[0]),
                 ("state.reactor_vapor.B", yy[1]),
@@ -561,13 +497,20 @@ mod tests {
                 ("state.reactor_vapor.H", yy[7]),
                 ("state.reactor.energy", yy[8]),
             ]);
-            let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
-            registry.borrow_mut().resolve().expect("agitator.speed deveria resolver contra o offer acima");
 
-            let (temperature, _temperature_k, pressure, volume_liquid, _density, _volume_vapor, _total_vapor_moles, _heat_of_reaction, _liquid_composition, _vapor_composition, _vapor_moles, _reaction_rates) =
-                reactor.__physical_state_impl();
-            let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
-            let (_reactor_heat, twr) = reactor.__heat_exchange_impl(volume_liquid, temperature);
+            let harness = Harness::new();
+            let _reactor = harness.unit(|registry| Reactor::new(registry, &initial));
+            harness.seed("agitator.speed", fields[34] /* XMV(12) agitator */);
+            let physical_state = harness.task("Reactor::physical_state");
+            let heat_exchange = harness.task("Reactor::heat_exchange");
+            harness.resolve();
+
+            physical_state.evaluate();
+            heat_exchange.evaluate();
+
+            let temperature = harness.read("reactor.temperature");
+            let xmeas_pressure = (harness.read("reactor.pressure") - 760.0) / 760.0 * 101.325;
+            let twr = harness.read("heat.reactor_cooling_water_return");
 
             let temperature_diff = (temperature - xmeas9).abs();
             let pressure_diff = (xmeas_pressure - xmeas7).abs();

@@ -12,7 +12,8 @@ EXATAMENTE as mesmas — só quem as publica mudou; `Flows`/`Derivatives`/`Measu
 por chave, indiferentes à origem.
 */
 
-use crate::physics::constants::TepConstants;
+use crate::physics::constants::{TepConstants, TEP_SPECIES};
+use monjolo::chemistry::{Mixture, Phase};
 
 /* Vazão máxima de cada válvula com curva linear (posição% * range / 100) — VRNG em TEINIT. */
 const FEED_D_RANGE: f64 = 400.0;
@@ -29,9 +30,9 @@ FEED_AC_COMPOSITION (stream 4, o feed combinado A&C) continua `pub(crate)` só p
 `disturbance::idv1` (que precisa do valor nominal pra montar a expectativa) — quem CONSOME de
 verdade (`units::stripper`) não importa mais isto direto: IDV(1)/(2)/(8) perturbam exatamente esta
 composição (Table 8, Downs & Vogel 1993), então ela é publicada como um valor OFERECIDO
-(`ac_feed_composition()` abaixo, sob uma chave "nominal") que `disturbance::idv1::Disturbances::idv1`
-(`#[monjolo::tasks(disturbance = "disturbance.idv1")]`) intercepta e reoferece sob a chave pública
-que o Stripper de fato lê — ver `docs/05-disturbios.md`. Só IDV(1) está implementado por enquanto;
+(`ac_feed_composition` abaixo, sob uma chave "nominal") que `disturbance::idv1::Disturbances::idv1`
+(`#[disturbance(key = "disturbance.idv1")]`) intercepta e reoferece sob a chave pública que o
+Stripper de fato lê — ver `docs/05-disturbios.md`. Só IDV(1) está implementado por enquanto;
 (2)/(8) continuam pendentes, migrados um a um.
 */
 pub(crate) const FEED_D_COMPOSITION: [f64; 8] = [0.0, 0.0001, 0.0, 0.9999, 0.0, 0.0, 0.0, 0.0];
@@ -50,88 +51,65 @@ pub struct Feed {
     constants: TepConstants,
 }
 
-#[monjolo::tasks]
+#[monjolo::tasks(species = TEP_SPECIES, len = 8)]
 impl Feed {
-    #[need(key = "valve.feed_d.position")]
-    #[offer(key = "flows.stream_flow.0")]
-    fn d_feed_flow(&self, position: f64) -> f64 {
-        position * FEED_D_RANGE / 100.0
+    #[task]
+    fn d_feed_flow(&self) {
+        offer::flows__stream_flow__0 = need::valve__feed_d__position * FEED_D_RANGE / 100.0;
     }
 
-    #[need(key = "valve.feed_e.position")]
-    #[offer(key = "flows.stream_flow.1")]
-    fn e_feed_flow(&self, position: f64) -> f64 {
-        position * FEED_E_RANGE / 100.0
+    #[task]
+    fn e_feed_flow(&self) {
+        offer::flows__stream_flow__1 = need::valve__feed_e__position * FEED_E_RANGE / 100.0;
     }
 
     /* IDV6 (nominal = 0) atuaria aqui — fora de escopo, mesma lacuna de hoje em Flows. */
-    #[need(key = "valve.feed_a.position")]
-    #[offer(key = "flows.stream_flow.2")]
-    fn a_feed_flow(&self, position: f64) -> f64 {
-        position * FEED_A_RANGE / 100.0
+    #[task]
+    fn a_feed_flow(&self) {
+        offer::flows__stream_flow__2 = need::valve__feed_a__position * FEED_A_RANGE / 100.0;
     }
 
     /* IDV7 (nominal = 0) atuaria aqui — mesma lacuna. +1e-10: evita divisão por zero em quem usa
     este valor como denominador (Block 26 do flash split, `flow[3] / flow[10]`) quando a válvula
     está fechada — preservado do original.
     */
-    #[need(key = "valve.feed_ac.position")]
-    #[offer(key = "flows.stream_flow.3")]
-    fn ac_feed_flow(&self, position: f64) -> f64 {
-        position * FEED_AC_RANGE / 100.0 + 1e-10
+    #[task]
+    fn ac_feed_flow(&self) {
+        offer::flows__stream_flow__3 = need::valve__feed_ac__position * FEED_AC_RANGE / 100.0 + 1e-10;
     }
 
     /* Composição NOMINAL do feed combinado A&C (TEINIT) — publicada sob uma chave "nominal" própria,
     nunca a chave pública (`flows.stream4_composition`, que `units::stripper` de fato lê). IDV(1)
     (`tep-plant/src/disturbance/idv1.rs`, `Disturbances::idv1`) precisa desta grandeza NOMINAL como
     `#[need]` pra poder interceptá-la e reofertá-la, alterada ou não, sob a chave pública — `Feed`
-    nunca sabe que existe distúrbio nenhum, só publica a condição de projeto, sempre igual.
+    nunca sabe que existe distúrbio nenhum, só publica a condição de projeto, sempre igual. É o
+    único lugar do sistema que CRIA uma `Mixture` do nada (matéria entrando de fora da planta).
     */
-    #[offer(prefix = "flows.stream4_composition_nominal", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    fn ac_feed_composition(&self) -> [f64; 8] {
-        FEED_AC_COMPOSITION
+    #[task]
+    fn ac_feed_composition(&self) {
+        offer::flows__stream4_composition_nominal::<Vapor> = Mixture::new(FEED_AC_COMPOSITION, Phase::Vapor, &TEP_SPECIES);
     }
 
-    #[offer(key = "flows.d_feed_mol_weight")]
-    fn d_feed_mol_weight(&self) -> f64 {
-        mol_weight(&FEED_D_COMPOSITION, &self.constants)
+    #[task]
+    fn d_feed_mol_weight(&self) {
+        offer::flows__d_feed_mol_weight = mol_weight(&FEED_D_COMPOSITION, &self.constants);
     }
 
-    #[offer(key = "flows.e_feed_mol_weight")]
-    fn e_feed_mol_weight(&self) -> f64 {
-        mol_weight(&FEED_E_COMPOSITION, &self.constants)
+    #[task]
+    fn e_feed_mol_weight(&self) {
+        offer::flows__e_feed_mol_weight = mol_weight(&FEED_E_COMPOSITION, &self.constants);
     }
 
     /* Bloco (ex-measured.rs, Block 35): XMEAS 1-4 (A/D/E/A&C Feed) — conversões de unidade
     preservadas exatamente do original: 0.359/35.3145 (kmol/h → kscmh, gás), XMW*0.454 (kmol/h →
     kg/h, via peso molecular, pras 2 medidas por massa).
     */
-    #[need(key = "flows.stream_flow.2")]
-    #[need(key = "flows.stream_flow.0")]
-    #[need(key = "flows.d_feed_mol_weight")]
-    #[need(key = "flows.stream_flow.1")]
-    #[need(key = "flows.e_feed_mol_weight")]
-    #[need(key = "flows.stream_flow.3")]
-    #[offer(key = "xmeas.stream1.flow_rate")]
-    #[offer(key = "xmeas.stream2.flow_rate")]
-    #[offer(key = "xmeas.stream3.flow_rate")]
-    #[offer(key = "xmeas.stream4.flow_rate")]
-    #[allow(clippy::too_many_arguments)]
-    fn xmeas_readings(
-        &self,
-        a_feed_flow: f64,
-        d_feed_flow: f64,
-        d_feed_mol_weight: f64,
-        e_feed_flow: f64,
-        e_feed_mol_weight: f64,
-        ac_feed_flow: f64,
-    ) -> (f64, f64, f64, f64) {
-        let xmeas_a_feed = a_feed_flow * 0.359 / 35.3145;
-        let xmeas_d_feed = d_feed_flow * d_feed_mol_weight * 0.454;
-        let xmeas_e_feed = e_feed_flow * e_feed_mol_weight * 0.454;
-        let xmeas_ac_feed = ac_feed_flow * 0.359 / 35.3145;
-
-        (xmeas_a_feed, xmeas_d_feed, xmeas_e_feed, xmeas_ac_feed)
+    #[task]
+    fn xmeas_readings(&self) {
+        offer::xmeas__stream1__flow_rate = need::flows__stream_flow__2 * 0.359 / 35.3145;
+        offer::xmeas__stream2__flow_rate = need::flows__stream_flow__0 * need::flows__d_feed_mol_weight * 0.454;
+        offer::xmeas__stream3__flow_rate = need::flows__stream_flow__1 * need::flows__e_feed_mol_weight * 0.454;
+        offer::xmeas__stream4__flow_rate = need::flows__stream_flow__3 * 0.359 / 35.3145;
     }
 }
 
