@@ -17,6 +17,7 @@ teprob.f), só a leitura (block 12) está reduzida ao que já é consumido.
 use monjolo::disturbance::cubic::{eval_disturbance, lcg_rand, update_segment};
 use monjolo::state_registry::{Proxy, StateRegistry};
 
+pub mod idv1;
 pub mod state;
 use state::TepDisturbanceState;
 

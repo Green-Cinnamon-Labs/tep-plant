@@ -75,6 +75,17 @@ pub struct Reactor {
     #[offer(key = "reactor.state.enthalpy")]
     enthalpy: f64,
 
+    /* Prova de conceito: `#[need]` já funciona em CAMPO de struct, não só em parâmetro de task —
+    resolvido uma vez em `Reactor::new()`, exposto como `self.agitator_speed()` pra QUALQUER método
+    do `impl` abaixo, sem precisar redeclarar `#[need(key = "agitator.speed")]` em cada um. Só
+    seguro fazer isso quando quem oferece a chave é uma unidade DIFERENTE (aqui, o atuador
+    `Agitator`) — se fosse uma chave oferecida por outra TASK deste mesmo `Reactor`, isso criaria um
+    ciclo de construção (o struct precisaria da task, a task precisa do struct já construído).
+    */
+    /** Temperatura do vapor de reciclo do compressor (°C) — usada no balanço de entalpia do reator. */
+    #[need(key = "agitator.speed")]
+    agitator_speed: f64,
+
     constants: TepConstants,
 }
 
@@ -223,15 +234,15 @@ impl Reactor {
     */
     #[need(key = "reactor.liquid_volume")]
     #[need(key = "reactor.temperature")]
-    #[need(key = "agitator.speed")]
     #[offer(key = "heat.reactor_heat")]
     #[offer(key = "heat.reactor_cooling_water_return")]
-    fn heat_exchange(&self, reactor_liquid_volume: f64, reactor_temperature: f64, agitator_speed: f64) -> (f64, f64) {
+    fn heat_exchange(&self, reactor_liquid_volume: f64, reactor_temperature: f64) -> (f64, f64) {
         /* UARLEV: fração da serpentina submersa, 0 abaixo de level=10 (seca, sem troca), rampa
         linear até level=50, platô em 1.0 dali pra cima (totalmente submersa — mais líquido não
-        aumenta mais nada).
+        aumenta mais nada). `self.agitator_speed()` vem do campo do struct (acima), não de um
+        `#[need]` local a este método.
         */
-        let agitation_factor = (agitator_speed + 150.0) / 100.0;
+        let agitation_factor = (self.agitator_speed() + 150.0) / 100.0;
         let level = reactor_liquid_volume / 7.8; /* 7.8 = fator de conversão de volume pra "nível" deste bloco */
         let uar_level = if level > 50.0 {
             1.0
@@ -530,6 +541,15 @@ mod tests {
             let yy = &fields[36..45]; /* YY[0..8]: reactor A,B,C,D,E,F,G,H,energy */
 
             let registry = StateRegistry::shared();
+            /* `agitator.speed` agora é um `#[need]` de CAMPO do struct (não mais parâmetro de
+            `heat_exchange`) — precisa de um ofertante de verdade + `resolve()`, não dá mais pra
+            simplesmente passar `fields[34]` como argumento solto. Ofertado ANTES de `Reactor::new()`
+            só por legibilidade — ordem não importa (Art. 6.3: precisa vem antes ou depois do oferece
+            sem diferença, `resolve()` casa os dois no final de qualquer forma).
+            */
+            let (agitator_speed_offered, _) = registry.borrow_mut().subscribe(&["agitator.speed"], &[]);
+            agitator_speed_offered[0].set(fields[34] /* XMV(12) agitator */);
+
             let initial = Snapshot::from_pairs(&[
                 ("state.reactor_vapor.A", yy[0]),
                 ("state.reactor_vapor.B", yy[1]),
@@ -542,11 +562,12 @@ mod tests {
                 ("state.reactor.energy", yy[8]),
             ]);
             let reactor = Reactor::new(&mut registry.borrow_mut(), &initial);
+            registry.borrow_mut().resolve().expect("agitator.speed deveria resolver contra o offer acima");
 
             let (temperature, _temperature_k, pressure, volume_liquid, _density, _volume_vapor, _total_vapor_moles, _heat_of_reaction, _liquid_composition, _vapor_composition, _vapor_moles, _reaction_rates) =
                 reactor.__physical_state_impl();
             let xmeas_pressure = (pressure - 760.0) / 760.0 * 101.325;
-            let (_reactor_heat, twr) = reactor.__heat_exchange_impl(volume_liquid, temperature, fields[34] /* XMV(12) agitator */);
+            let (_reactor_heat, twr) = reactor.__heat_exchange_impl(volume_liquid, temperature);
 
             let temperature_diff = (temperature - xmeas9).abs();
             let pressure_diff = (xmeas_pressure - xmeas7).abs();

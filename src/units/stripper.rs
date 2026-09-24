@@ -1,6 +1,6 @@
 /* tep/units/stripper.rs */
 
-use crate::units::feed::{FEED_AC_COMPOSITION, FEED_TEMPERATURE};
+use crate::units::feed::FEED_TEMPERATURE;
 use crate::physics::constants::TepConstants;
 use monjolo::chemistry::{liquid_density, mixture_enthalpy, temperature_from_enthalpy};
 
@@ -80,15 +80,17 @@ impl Stripper {
     #[need(key = "flows.stream_flow.10")]
     #[need(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[need(key = "stripper.temperature")]
+    #[need(prefix = "flows.stream4_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[offer(key = "flows.stream_flow.4")]
     #[offer(key = "flows.stream_flow.11")]
     #[offer(prefix = "flows.flash_vapor_component_flow", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[offer(prefix = "flows.flash_liquid_component_flow", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    fn flash_split(&self, ac_feed_flow: f64, underflow_flow: f64, separator_liquid: [f64; 8], stripper_temperature: f64) -> (f64, f64, [f64; 8], [f64; 8]) {
+    #[allow(clippy::too_many_arguments)]
+    fn flash_split(&self, ac_feed_flow: f64, underflow_flow: f64, separator_liquid: [f64; 8], stripper_temperature: f64, ac_feed_composition: [f64; 8]) -> (f64, f64, [f64; 8], [f64; 8]) {
         let mut component_flow_3 = [0.0f64; 8];
         let mut component_flow_10 = [0.0f64; 8];
         for i in 0..8 {
-            component_flow_3[i] = FEED_AC_COMPOSITION[i] * ac_feed_flow;
+            component_flow_3[i] = ac_feed_composition[i] * ac_feed_flow;
             component_flow_10[i] = separator_liquid[i] * underflow_flow;
         }
 
@@ -165,6 +167,7 @@ impl Stripper {
     #[need(prefix = "separator.liquid_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[need(key = "separator.temperature")]
     #[need(key = "heat.condenser_heat")]
+    #[need(prefix = "flows.stream4_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
     #[offer(prefix = "stripper.state", components = ["0.derivative", "1.derivative", "2.derivative", "3.derivative", "4.derivative", "5.derivative", "6.derivative", "7.derivative"])]
     #[offer(key = "stripper.state.8.derivative")]
     #[allow(clippy::too_many_arguments)]
@@ -181,8 +184,9 @@ impl Stripper {
         separator_liquid: [f64; 8],
         separator_temperature: f64,
         condenser_heat: f64,
+        ac_feed_composition: [f64; 8],
     ) -> ([f64; 8], f64) {
-        let enthalpy_feed_ac = mixture_enthalpy(&FEED_AC_COMPOSITION, FEED_TEMPERATURE, 1, &self.constants);
+        let enthalpy_feed_ac = mixture_enthalpy(&ac_feed_composition, FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_separator_liquid = mixture_enthalpy(&separator_liquid, separator_temperature, 0, &self.constants);
         let enthalpy_stripper_liquid = mixture_enthalpy(&stripper_liquid, stripper_temperature, 0, &self.constants);
 

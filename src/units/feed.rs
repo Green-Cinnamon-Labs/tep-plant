@@ -21,9 +21,18 @@ const FEED_A_RANGE: f64 = 100.0;
 const FEED_AC_RANGE: f64 = 1500.0;
 
 /* Composições nominais dos feeds puros (TEINIT) — índice de componente A=0,B=1,C=2,D=3,E=4,F=5,
-G=6,H=7, mesma convenção de physics/constants.rs. `pub(crate)` — Compressor/Stripper (via
-`crate::units::feed::{...}`) reusam FEED_AC_COMPOSITION/FEED_D_COMPOSITION/etc. pro balanço de massa/
-energia do compressor e pro flash do stripper, em vez de duplicar os números.
+G=6,H=7, mesma convenção de physics/constants.rs. `pub(crate)` — Compressor (via
+`crate::units::feed::{...}`) reusa FEED_D_COMPOSITION/FEED_E_COMPOSITION/FEED_A_COMPOSITION pro
+balanço de massa/energia do compressor, em vez de duplicar os números.
+
+FEED_AC_COMPOSITION (stream 4, o feed combinado A&C) continua `pub(crate)` só pelo teste de
+`disturbance::idv1` (que precisa do valor nominal pra montar a expectativa) — quem CONSOME de
+verdade (`units::stripper`) não importa mais isto direto: IDV(1)/(2)/(8) perturbam exatamente esta
+composição (Table 8, Downs & Vogel 1993), então ela é publicada como um valor OFERECIDO
+(`ac_feed_composition()` abaixo, sob uma chave "nominal") que `disturbance::idv1::Disturbances::idv1`
+(`#[monjolo::tasks(disturbance = "disturbance.idv1")]`) intercepta e reoferece sob a chave pública
+que o Stripper de fato lê — ver `docs/05-disturbios.md`. Só IDV(1) está implementado por enquanto;
+(2)/(8) continuam pendentes, migrados um a um.
 */
 pub(crate) const FEED_D_COMPOSITION: [f64; 8] = [0.0, 0.0001, 0.0, 0.9999, 0.0, 0.0, 0.0, 0.0];
 pub(crate) const FEED_E_COMPOSITION: [f64; 8] = [0.0, 0.0, 0.0, 0.0, 0.9999, 0.0001, 0.0, 0.0];
@@ -70,6 +79,17 @@ impl Feed {
     #[offer(key = "flows.stream_flow.3")]
     fn ac_feed_flow(&self, position: f64) -> f64 {
         position * FEED_AC_RANGE / 100.0 + 1e-10
+    }
+
+    /* Composição NOMINAL do feed combinado A&C (TEINIT) — publicada sob uma chave "nominal" própria,
+    nunca a chave pública (`flows.stream4_composition`, que `units::stripper` de fato lê). IDV(1)
+    (`tep-plant/src/disturbance/idv1.rs`, `Disturbances::idv1`) precisa desta grandeza NOMINAL como
+    `#[need]` pra poder interceptá-la e reofertá-la, alterada ou não, sob a chave pública — `Feed`
+    nunca sabe que existe distúrbio nenhum, só publica a condição de projeto, sempre igual.
+    */
+    #[offer(prefix = "flows.stream4_composition_nominal", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
+    fn ac_feed_composition(&self) -> [f64; 8] {
+        FEED_AC_COMPOSITION
     }
 
     #[offer(key = "flows.d_feed_mol_weight")]
