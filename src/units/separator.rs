@@ -1,39 +1,14 @@
-/* tep/units/separator.rs */
+/* Documentação: docs/13-separador.md */
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
 use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture};
 
-const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [ft³, unidade interna do teprob.f] */
-const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0; /* VRNG (TEINIT) da válvula de underflow */
-
-/* Temperatura de RETORNO da água de resfriamento do separador (`tws`) — diferente do reator
-(`Reactor::heat_exchange`), aqui é mesmo uma constante no teprob.f original: Block 40 do modelo
-monolítico (`v1.0.0`) marca a derivada de `tws` como sempre zero ("tws kept at snapshot value"),
-então não existe balanço de calor quase-estático nenhum pra resolver aqui — só o valor congelado
-que o snapshot inicial semeou.
-
-NOTA (2026-09-15): antes desta correção, esta constante era 40.0 — o `s_zero` do canal de
-distúrbio 5 (TCWS, temperatura de ENTRADA da água de resfriamento do separador), não `tws`. Mesmo
-erro de troca entrada/saída do bug já corrigido em `Reactor::heat_exchange`, achado ao comparar
-contra `application.toml`/`te_exp3_snapshot.toml`: `[state.cooling].separator_water_temp =
-77.29698353` é o valor congelado de verdade. Consequência: o separador resfriava mais forte que o
-correto, empurrando entalpia fria pro reciclo do compressor — um dos dois termos dominantes do
-balanço de energia do reator (`Reactor::mass_and_energy_balance`) — contribuindo pro colapso rápido
-de temperatura do reator observado ao vivo (120°C → ~42°C em ~21 min simulados) mesmo já com a
-correção do reator sozinha aplicada.
-*/
+const SEPARATOR_VOLUME: f64 = 3500.0;
+const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0;
 const SEPARATOR_COOLING_WATER_RETURN: f64 = 77.29698353;
 
-/** Terceira unidade migrada pro scheduler de dataflow topológico (issue 10), depois de Feed e
-Compressor. Absorve de `flows.rs`: Block 22/25 (slots 9/10, purge e underflow). De `heat.rs`:
-Block 33 (troca térmica do separador). De `derivatives.rs`: a seção "Separador" do balanço de
-massa/energia (Block 40, YP(10..18)). De `purge_analyzer.rs`: XMEAS 29-36 (Purge Gas Analysis).
-*/
 #[monjolo::dynamic_model(tasks)]
 pub struct Separator {
-    /* Estado próprio (9 números) — mesmo split de Reactor, mesmo motivo (chave de config não
-    uniforme entre vapor/líquido e entalpia).
-    */
     #[state]
     #[config(prefix = "state.separator_vapor", components = ["A", "B", "C"])]
     #[offer(prefix = "separator.state", components = ["vapor_a", "vapor_b", "vapor_c"])]
@@ -54,9 +29,6 @@ pub struct Separator {
 
 #[monjolo::tasks(species = TEP_SPECIES, len = 8)]
 impl Separator {
-    /* Bloco 1: balanço de energia próprio → temperatura/pressão/composição/volume/densidade —
-    igual ao `compute()` monolítico de antes, agora uma tarefa entre várias.
-    */
     #[task]
     fn physical_state(&self) {
         let vapor = Mixture::at(0, &self.vapor(), &TEP_SPECIES);
@@ -70,7 +42,6 @@ impl Separator {
         let volume_liquid = liquid.total() / density;
         let volume_vapor = SEPARATOR_VOLUME - volume_liquid;
 
-        /* A/B/C: gás ideal a partir dos moles de vapor; D-H: Antoine × fração líquida. */
         let partial_pressures = vapor.ideal_gas_pressure(temperature_k, volume_vapor)
             + liquid_composition.vapor_pressure(temperature, &self.constants);
         let pressure = partial_pressures.total();
@@ -84,10 +55,6 @@ impl Separator {
         offer::separator__vapor_composition::<Mixture> = vapor_composition;
     }
 
-    /* Bloco 2 (ex-Flows, Block 22/25): purge (slot 9, dependente de pressão+composição próprias) e
-    underflow (slot 10, puramente linear na válvula — sem acoplamento nenhum, mas fica junto por
-    ser a outra saída direta do vaso).
-    */
     #[task]
     fn outlet_flows(&self) {
         let mol_weight = need::separator__vapor_composition::<Mixture>.dot(&self.constants.xmw);
@@ -95,10 +62,6 @@ impl Separator {
         offer::flows__stream_flow__10 = need::valve__separator_underflow__position * SEPARATOR_UNDERFLOW_RANGE / 100.0;
     }
 
-    /* Bloco 3 (ex-Heat, Block 33): troca térmica no separador — UAS depende da vazão reator→
-    separador; a temperatura de referência é a do REATOR (não do separador — TST(8) aponta pro
-    reator no teprob.f, Block 20), preservado por fidelidade.
-    */
     #[task]
     fn heat_exchange(&self) {
         let uas = 0.404655 * (1.0 - 1.0 / (1.0 + (need::flows__stream_flow__7 / 3528.73).powi(4)));
@@ -106,11 +69,6 @@ impl Separator {
         offer::heat__separator_cooling_water_return = SEPARATOR_COOLING_WATER_RETURN;
     }
 
-    /* Bloco 4 (ex-Derivatives, Block 40 YP(10..18)): balanço de massa/energia do próprio estado.
-    `enthalpy_separator_liquid` é recomputada aqui (não lida de volta) — mesmo padrão já usado em
-    `derivatives.rs` pras entalpias de feed: quem precisa recalcula fresco a partir de composição+
-    temperatura já publicadas, em vez de depender de mais uma chave.
-    */
     #[task]
     fn mass_and_energy_balance(&self) {
         let reactor_vapor = need::reactor__vapor_composition::<Mixture>;
@@ -123,9 +81,6 @@ impl Separator {
         let separator_temperature = need::separator__temperature;
 
         let enthalpy_reactor_outlet = reactor_vapor.enthalpy(need::reactor__temperature, 1, &self.constants);
-        /* SEM a correção de Block 24 (compressor) — é o que HST(10) preserva no original, por ter
-        sido copiado ANTES da correção rodar.
-        */
         let enthalpy_separator_vapor_uncorrected = separator_vapor.enthalpy(separator_temperature, 1, &self.constants);
         let enthalpy_separator_liquid = separator_liquid.enthalpy(separator_temperature, 0, &self.constants);
 
@@ -149,19 +104,11 @@ impl Separator {
             + need::heat__separator_heat;
     }
 
-    /* Bloco 5 (ex-purge_analyzer.rs): XMEAS 29-36, Purge Gas Analysis (Stream 9) — a mesma
-    composição de vapor que alimenta o recycle na stream 8 (Block 27 de teprob.f, `FCM(I,9)`/
-    `FCM(I,8)` usam o mesmo `XST(.,9)=XST(.,8)`), convertida de fração molar pra mol%.
-    */
     #[task]
     fn purge_analysis(&self) {
         offer::xmeas__stream9__component::<Mixture> = need::separator__vapor_composition::<Mixture>.scaled_by(100.0);
     }
 
-    /* Bloco 6 (ex-measured.rs, Block 35): XMEAS 10 (Purge Rate, stream9), 11-13 (temperatura/
-    nível/pressão do separador), 14 (Separator Underflow, stream10), 22 (temperatura de saída da
-    água de resfriamento) — conversões preservadas exatamente do original.
-    */
     #[task]
     fn xmeas_readings(&self) {
         offer::xmeas__stream9__flow_rate = need::flows__stream_flow__9 * 0.359 / 35.3145;

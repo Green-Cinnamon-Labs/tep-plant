@@ -1,19 +1,12 @@
-/* tep/units/stripper.rs */
+/* Documentação: docs/14-stripper.md */
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
 use crate::units::feed::FEED_TEMPERATURE;
 use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture};
 
-const STRIPPER_PRODUCT_RANGE: f64 = 1000.0; /* VRNG (TEINIT) da válvula de produto */
-const STRIPPER_STEAM_RANGE: f64 = 0.03; /* VRNG (TEINIT) da válvula de vapor (UAC) */
+const STRIPPER_PRODUCT_RANGE: f64 = 1000.0;
+const STRIPPER_STEAM_RANGE: f64 = 0.03;
 
-/** Quarta unidade migrada pro scheduler de dataflow topológico (issue 10), depois de Feed/
-Compressor/Separator. Absorve de `flows.rs`: Block 22 (slot 12, produto), Block 25-28 (flash split
-completo — entrada combinada A&C feed + underflow do separador, fração de split, slots 4/11 de
-saída). De `heat.rs`: Block 34 (condenser/reboiler) + o próprio `condenser_ua` (Block 22, UAC —
-nunca tinha dono, só usado aqui mesmo). De `derivatives.rs`: a seção "Stripper" do balanço de
-massa/energia (Block 40, YP(19..27)). De `product_analyzer.rs`: XMEAS 37-41 (Product Analysis).
-*/
 #[monjolo::dynamic_model(tasks)]
 pub struct Stripper {
     #[state]
@@ -31,9 +24,6 @@ pub struct Stripper {
 
 #[monjolo::tasks(species = TEP_SPECIES, len = 8)]
 impl Stripper {
-    /* Bloco 1: balanço de energia próprio → temperatura/volume/densidade/composição — igual ao
-    `compute()` monolítico de antes.
-    */
     #[task]
     fn physical_state(&self) {
         let liquid = Mixture::new(self.liquid(), &TEP_SPECIES);
@@ -50,20 +40,11 @@ impl Stripper {
         offer::stripper__liquid_composition::<Mixture> = liquid_composition;
     }
 
-    /* Bloco 2 (ex-Flows, Block 22 slot 12): produto do stripper — puramente linear na válvula,
-    sem acoplamento nenhum, mesmo padrão do underflow do Separator.
-    */
     #[task]
     fn product_flow(&self) {
         offer::flows__stream_flow__12 = need::valve__stripper_product__position * STRIPPER_PRODUCT_RANGE / 100.0;
     }
 
-    /* Bloco 3 (ex-Flows, Blocks 25-28): split flash da entrada combinada (A&C feed direto do Feed +
-    underflow do separador). Fração de split fixa (SFR, TEINIT) pros componentes A/B/C — nunca
-    recalculada; D-H dependem da própria temperatura (Block 26) — ver comentário original de
-    `flows.rs` sobre o bug real encontrado aqui (A&C caindo inteiro no líquido, inundando o
-    stripper) — preservado tal qual.
-    */
     #[task]
     fn flash_split(&self) {
         let ac_feed_flow = need::flows__stream_flow__3;
@@ -124,10 +105,6 @@ impl Stripper {
         offer::flows__flash_liquid_component_flow::<Mixture> = Mixture::new(component_flow_11, &TEP_SPECIES);
     }
 
-    /* Bloco 4 (ex-Heat, Block 34 + o UAC de Block 22 — que nunca teve dono próprio além de ser
-    consumido aqui mesmo): resfriamento condicional do reboiler — só troca calor se a temperatura
-    do stripper estiver abaixo de 100°C.
-    */
     #[task]
     fn heat_exchange(&self) {
         let condenser_ua = need::valve__stripper_steam__position * STRIPPER_STEAM_RANGE / 100.0;
@@ -135,10 +112,6 @@ impl Stripper {
         offer::heat__condenser_heat = if stripper_temperature < 100.0 { condenser_ua * (100.0 - stripper_temperature) } else { 0.0 };
     }
 
-    /* Bloco 5 (ex-Derivatives, Block 40 YP(19..27)): balanço de massa/energia do próprio estado.
-    Entalpias recomputadas frescas (mesmo padrão já usado nas outras unidades) — nada aqui lê uma
-    entalpia publicada por outro componente.
-    */
     #[task]
     fn mass_and_energy_balance(&self) {
         let flash_liquid_flow = need::flows__flash_liquid_component_flow::<Mixture>;
@@ -180,10 +153,6 @@ impl Stripper {
             + need::heat__condenser_heat;
     }
 
-    /* Bloco 6 (ex-product_analyzer.rs): XMEAS 37-41, Product Analysis (Stream 11) — a composição
-    líquida própria (a mesma que `valve.stripper_product.position` escoa) convertida pra mol%.
-    Só os 5 componentes D-H saem como XMEAS (A-C não existem nesta corrente).
-    */
     #[task]
     fn product_analysis(&self) {
         let composition = need::stripper__liquid_composition::<Mixture>;
@@ -194,10 +163,6 @@ impl Stripper {
         offer::xmeas__stream11__component__h = composition.component(7) * 100.0;
     }
 
-    /* Bloco 7 (ex-measured.rs, Block 35): XMEAS 15 (Stripper Level), 17 (Stripper Underflow,
-    stream11), 18 (Stripper Temperature), 19 (Stripper Steam Flow) — conversões preservadas
-    exatamente do original. VTC = 156.5 (TEINIT) pro nível.
-    */
     #[task]
     fn xmeas_readings(&self) {
         offer::xmeas__stripper__level = (need::stripper__liquid_volume - 78.25) / 156.5 * 100.0;
