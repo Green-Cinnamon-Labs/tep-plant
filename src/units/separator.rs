@@ -1,10 +1,9 @@
 /* tep/units/separator.rs */
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
-use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture, Phase};
+use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture};
 
-const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [m³] */
-const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
+const SEPARATOR_VOLUME: f64 = 3500.0; /* volume total do separador vapor/líquido [ft³, unidade interna do teprob.f] */
 const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0; /* VRNG (TEINIT) da válvula de underflow */
 
 /* Temperatura de RETORNO da água de resfriamento do separador (`tws`) — diferente do reator
@@ -60,8 +59,8 @@ impl Separator {
     */
     #[task]
     fn physical_state(&self) {
-        let vapor = Mixture::at(0, &self.vapor(), Phase::Vapor, &TEP_SPECIES);
-        let liquid = Mixture::at(3, &self.liquid(), Phase::Liquid, &TEP_SPECIES);
+        let vapor = Mixture::at(0, &self.vapor(), &TEP_SPECIES);
+        let liquid = Mixture::at(3, &self.liquid(), &TEP_SPECIES);
         let liquid_composition = liquid.mole_fractions();
 
         let specific_enthalpy = self.enthalpy() / liquid.total();
@@ -72,7 +71,7 @@ impl Separator {
         let volume_vapor = SEPARATOR_VOLUME - volume_liquid;
 
         /* A/B/C: gás ideal a partir dos moles de vapor; D-H: Antoine × fração líquida. */
-        let partial_pressures = vapor.ideal_gas_pressure(temperature_k, volume_vapor, GAS_CONSTANT)
+        let partial_pressures = vapor.ideal_gas_pressure(temperature_k, volume_vapor)
             + liquid_composition.vapor_pressure(temperature, &self.constants);
         let pressure = partial_pressures.total();
         let vapor_composition = partial_pressures.mole_fractions();
@@ -81,8 +80,8 @@ impl Separator {
         offer::separator__pressure = pressure;
         offer::separator__liquid_volume = volume_liquid;
         offer::separator__liquid_density = density;
-        offer::separator__liquid_composition::<Liquid> = liquid_composition;
-        offer::separator__vapor_composition::<Vapor> = vapor_composition;
+        offer::separator__liquid_composition::<Mixture> = liquid_composition;
+        offer::separator__vapor_composition::<Mixture> = vapor_composition;
     }
 
     /* Bloco 2 (ex-Flows, Block 22/25): purge (slot 9, dependente de pressão+composição próprias) e
@@ -91,7 +90,7 @@ impl Separator {
     */
     #[task]
     fn outlet_flows(&self) {
-        let mol_weight = need::separator__vapor_composition::<Vapor>.dot(&self.constants.xmw);
+        let mol_weight = need::separator__vapor_composition::<Mixture>.dot(&self.constants.xmw);
         offer::flows__stream_flow__9 = need::valve__purge__position * 0.151169 * (need::separator__pressure - 760.0).max(0.0).sqrt() / mol_weight;
         offer::flows__stream_flow__10 = need::valve__separator_underflow__position * SEPARATOR_UNDERFLOW_RANGE / 100.0;
     }
@@ -114,9 +113,9 @@ impl Separator {
     */
     #[task]
     fn mass_and_energy_balance(&self) {
-        let reactor_vapor = need::reactor__vapor_composition::<Vapor>;
-        let separator_vapor = need::separator__vapor_composition::<Vapor>;
-        let separator_liquid = need::separator__liquid_composition::<Liquid>;
+        let reactor_vapor = need::reactor__vapor_composition::<Mixture>;
+        let separator_vapor = need::separator__vapor_composition::<Mixture>;
+        let separator_liquid = need::separator__liquid_composition::<Mixture>;
         let flow7 = need::flows__stream_flow__7;
         let flow8 = need::flows__stream_flow__8;
         let flow9 = need::flows__stream_flow__9;
@@ -156,7 +155,7 @@ impl Separator {
     */
     #[task]
     fn purge_analysis(&self) {
-        offer::xmeas__stream9__component::<Vapor> = need::separator__vapor_composition::<Vapor>.scaled_by(100.0);
+        offer::xmeas__stream9__component::<Mixture> = need::separator__vapor_composition::<Mixture>.scaled_by(100.0);
     }
 
     /* Bloco 6 (ex-measured.rs, Block 35): XMEAS 10 (Purge Rate, stream9), 11-13 (temperatura/

@@ -1,49 +1,49 @@
 /* Documentação: docs/12-reator.md */
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
-use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture, Phase, Reaction, ReactionScheme};
+use monjolo::chemistry::{arrhenius, liquid_density, temperature_from_enthalpy, Mixture, Reactions};
+use std::sync::LazyLock;
 
 const REACTOR_VOLUME: f64 = 1300.0;
-const GAS_CONSTANT: f64 = 998.9;
-const TEP_REACTIONS: ReactionScheme<8, 4> = ReactionScheme {
-    stoichiometry: [
-        [-1.0, 0.0, -1.0, -1.0, 0.0, 0.0, 1.0, 0.0],
-        [-1.0, 0.0, -1.0, 0.0, -1.0, 0.0, 0.0, 1.0],
-        [-1.0, 0.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, -1.5, 0.0, 1.0, 0.0, 0.0],
-    ],
-    enthalpies: [0.06899381054, 0.05, 0.0, 0.0],
-};
 const REACTION_FACTOR_1_NOMINAL: f64 = 1.0;
 const REACTION_FACTOR_2_NOMINAL: f64 = 1.0;
 const TEMPERATURE_SEED: f64 = 120.0;
 const REACTOR_COOLING_WATER_RETURN: f64 = 94.59927549;
 
-fn kinetics(temperature_k: f64, partial_pressures: &Mixture<8>, volume_vapor: f64) -> Reaction<8, 4> {
-    let p = |i: usize| partial_pressures.component(i);
-
-    let mut rates = [0.0f64; 4];
-    rates[0] = (31.5859536 - 40000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_1_NOMINAL;
-    rates[1] = (3.00094014 - 20000.0 / 1.987 / temperature_k).exp() * REACTION_FACTOR_2_NOMINAL;
-    rates[2] = (53.4060443 - 60000.0 / 1.987 / temperature_k).exp();
-    rates[3] = rates[2] * 0.767488334;
-    if p(0) > 0.0 && p(2) > 0.0 {
-        let rf1 = p(0).powf(1.1544);
-        let rf2 = p(2).powf(0.3735);
-        rates[0] *= rf1 * rf2 * p(3);
-        rates[1] *= rf1 * rf2 * p(4);
-    } else {
-        rates[0] = 0.0;
-        rates[1] = 0.0;
-    }
-    rates[2] *= p(0) * p(4);
-    rates[3] *= p(0) * p(3);
-    for r in rates.iter_mut() {
-        *r *= volume_vapor;
-    }
-
-    Reaction::new(rates, &TEP_REACTIONS)
-}
+static REACTIONS: LazyLock<Reactions<8>> = LazyLock::new(|| {
+    Reactions::new(&TEP_SPECIES)
+        .add(
+            "A + C + D -> G", 
+            0.06899381054, 
+            |temperature_k, p| {
+                let (a, c, d) = (p.get("A"), p.get("C"), p.get("D"));
+                if a > 0.0 && c > 0.0 {
+                    arrhenius(31.5859536, 40000.0, temperature_k) * REACTION_FACTOR_1_NOMINAL * (a.powf(1.1544) * c.powf(0.3735) * d)
+                } else {
+                    0.0
+                }
+        })
+        .add(
+            "A + C + E -> H", 
+            0.05, 
+            |temperature_k, p| {
+                let (a, c, e) = (p.get("A"), p.get("C"), p.get("E"));
+                if a > 0.0 && c > 0.0 {
+                    arrhenius(3.00094014, 20000.0, temperature_k) * REACTION_FACTOR_2_NOMINAL * (a.powf(1.1544) * c.powf(0.3735) * e)
+                } else {
+                    0.0
+                }
+        })
+        .add(
+            "A + E -> F", 
+            0.0, 
+            |temperature_k, p| arrhenius(53.4060443, 60000.0, temperature_k) * (p.get("A") * p.get("E")))
+        .add(
+            "1.5 D -> F", 
+            0.0, 
+            |temperature_k, p| { arrhenius(53.4060443, 60000.0, temperature_k) * 0.767488334 * (p.get("A") * p.get("D"))
+        })
+});
 
 #[monjolo::dynamic_model(tasks)]
 pub struct Reactor {
@@ -67,10 +67,11 @@ pub struct Reactor {
 
 #[monjolo::tasks(species = TEP_SPECIES, len = 8)]
 impl Reactor {
+
     #[task]
     fn physical_state(&self) {
-        let vapor = Mixture::at(0, &self.vapor(), Phase::Vapor, &TEP_SPECIES);
-        let liquid = Mixture::at(3, &self.liquid(), Phase::Liquid, &TEP_SPECIES);
+        let vapor = Mixture::at(0, &self.vapor(), &TEP_SPECIES);
+        let liquid = Mixture::at(3, &self.liquid(), &TEP_SPECIES);
         let liquid_composition = liquid.mole_fractions();
 
         let specific_enthalpy = self.enthalpy() / liquid.total();
@@ -80,23 +81,23 @@ impl Reactor {
         let volume_liquid = liquid.total() / density;
         let volume_vapor = REACTOR_VOLUME - volume_liquid;
 
-        let partial_pressures = vapor.ideal_gas_pressure(temperature_k, volume_vapor, GAS_CONSTANT) + liquid_composition.vapor_pressure(temperature, &self.constants);
+        let partial_pressures = vapor.ideal_gas_pressure(temperature_k, volume_vapor) + liquid_composition.vapor_pressure(temperature, &self.constants);
         let pressure = partial_pressures.total();
         let vapor_composition = partial_pressures.mole_fractions();
 
-        let reaction = kinetics(temperature_k, &partial_pressures, volume_vapor);
+        let reacted = REACTIONS.at(temperature_k, &partial_pressures, volume_vapor);
 
         offer::reactor__temperature = temperature;
         offer::reactor__pressure = pressure;
         offer::reactor__liquid_volume = volume_liquid;
-        offer::reactor__heat_of_reaction = reaction.heat();
-        offer::reactor__vapor_composition::<Vapor> = vapor_composition;
-        offer::reactor__reaction_rates::<Mixed> = Mixture::new(reaction.species_rates(), Phase::Mixed, &TEP_SPECIES);
+        offer::reactor__heat_of_reaction = reacted.heat;
+        offer::reactor__vapor_composition::<Mixture> = vapor_composition;
+        offer::reactor__reaction_rates::<Mixture> = reacted.species_rates;
     }
 
     #[task]
     fn flow_to_separator(&self) {
-        let mol_weight = need::reactor__vapor_composition::<Vapor>.dot(&self.constants.xmw);
+        let mol_weight = need::reactor__vapor_composition::<Mixture>.dot(&self.constants.xmw);
         offer::flows__stream_flow__7 = 4574.21 * (need::reactor__pressure - need::separator__pressure).max(0.0).sqrt() * (1.0 - 0.25 * 0.0) / mol_weight;
     }
 
@@ -120,12 +121,12 @@ impl Reactor {
 
     #[task]
     fn mass_and_energy_balance(&self) {
-        let compressor_vapor = need::compressor__vapor_composition::<Vapor>;
-        let reactor_vapor = need::reactor__vapor_composition::<Vapor>;
+        let compressor_vapor = need::compressor__vapor_composition::<Mixture>;
+        let reactor_vapor = need::reactor__vapor_composition::<Mixture>;
         let compressor_recycle_flow = need::flows__stream_flow__6;
         let outlet_flow = need::flows__stream_flow__7;
 
-        let derivative = compressor_vapor.scaled_by(compressor_recycle_flow) - reactor_vapor.scaled_by(outlet_flow) + need::reactor__reaction_rates::<Mixed>;
+        let derivative = compressor_vapor.scaled_by(compressor_recycle_flow) - reactor_vapor.scaled_by(outlet_flow) + need::reactor__reaction_rates::<Mixture>;
 
         offer::reactor__state__vapor_a__derivative = derivative.component(0);
         offer::reactor__state__vapor_b__derivative = derivative.component(1);

@@ -13,7 +13,7 @@ por chave, indiferentes à origem.
 */
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
-use monjolo::chemistry::{Mixture, Phase};
+use monjolo::chemistry::{Mixture};
 
 /* Vazão máxima de cada válvula com curva linear (posição% * range / 100) — VRNG em TEINIT. */
 const FEED_D_RANGE: f64 = 400.0;
@@ -87,7 +87,7 @@ impl Feed {
     */
     #[task]
     fn ac_feed_composition(&self) {
-        offer::flows__stream4_composition_nominal::<Vapor> = Mixture::new(FEED_AC_COMPOSITION, Phase::Vapor, &TEP_SPECIES);
+        offer::flows__stream4_composition_nominal::<Mixture> = Mixture::new(FEED_AC_COMPOSITION, &TEP_SPECIES);
     }
 
     #[task]

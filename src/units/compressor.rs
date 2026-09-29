@@ -2,10 +2,9 @@
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
 use crate::units::feed::{FEED_A_COMPOSITION, FEED_D_COMPOSITION, FEED_E_COMPOSITION, FEED_TEMPERATURE};
-use monjolo::chemistry::{temperature_from_enthalpy, Mixture, Phase};
+use monjolo::chemistry::{temperature_from_enthalpy, Mixture, GAS_CONSTANT};
 
-const COMPRESSOR_VESSEL_VOLUME: f64 = 5000.0; /* volume do vaso do compressor/condensador [m³] */
-const GAS_CONSTANT: f64 = 998.9; /* R em [mmHg·m³/(kmol·K)] */
+const COMPRESSOR_VESSEL_VOLUME: f64 = 5000.0; /* volume do vaso do compressor/condensador [ft³, unidade interna do teprob.f] */
 const COMPRESSOR_FLOW_MAX: f64 = 280275.0; /* vazão mássica máxima do compressor [kg/h] */
 const COMPRESSOR_PRESSURE_RATIO_MAX: f64 = 1.3;
 
@@ -38,7 +37,7 @@ impl Compressor {
     */
     #[task]
     fn physical_state(&self) {
-        let vapor = Mixture::new(self.vapor(), Phase::Vapor, &TEP_SPECIES);
+        let vapor = Mixture::new(self.vapor(), &TEP_SPECIES);
         let vapor_composition = vapor.mole_fractions();
         let total_vapor_moles = vapor.total();
 
@@ -49,7 +48,7 @@ impl Compressor {
 
         offer::compressor__temperature = temperature;
         offer::compressor__pressure = pressure;
-        offer::compressor__vapor_composition::<Vapor> = vapor_composition;
+        offer::compressor__vapor_composition::<Mixture> = vapor_composition;
     }
 
     /* Bloco 2 (ex-Flows, Blocks 23/24/31): vazão de recycle (slot 5), bypass (slot 6, cópia do
@@ -63,8 +62,8 @@ impl Compressor {
         let compressor_pressure = need::compressor__pressure;
         let separator_pressure = need::separator__pressure;
         let separator_temperature = need::separator__temperature;
-        let separator_vapor = need::separator__vapor_composition::<Vapor>;
-        let compressor_vapor = need::compressor__vapor_composition::<Vapor>;
+        let separator_vapor = need::separator__vapor_composition::<Mixture>;
+        let compressor_vapor = need::compressor__vapor_composition::<Mixture>;
 
         let mw5 = compressor_vapor.dot(&self.constants.xmw);
         let mw8 = separator_vapor.dot(&self.constants.xmw);
@@ -105,9 +104,9 @@ impl Compressor {
         let flow4 = need::flows__stream_flow__4;
         let flow5 = need::flows__stream_flow__5;
         let flow8 = need::flows__stream_flow__8;
-        let flash_vapor_flow = need::flows__flash_vapor_component_flow::<Vapor>;
-        let separator_vapor = need::separator__vapor_composition::<Vapor>;
-        let compressor_vapor = need::compressor__vapor_composition::<Vapor>;
+        let flash_vapor_flow = need::flows__flash_vapor_component_flow::<Mixture>;
+        let separator_vapor = need::separator__vapor_composition::<Mixture>;
+        let compressor_vapor = need::compressor__vapor_composition::<Mixture>;
 
         /* Composição do vapor do flash (slot 4) só existe normalizando FCM — mesmo cálculo de
         `derivatives.rs` pra este mesmo termo.
@@ -119,10 +118,10 @@ impl Compressor {
                 flash_vapor_composition[i] = flash_vapor_flow.component(i) / flash_vapor_total;
             }
         }
-        let enthalpy_flash_vapor = Mixture::new(flash_vapor_composition, Phase::Vapor, &TEP_SPECIES).enthalpy(need::stripper__temperature, 1, &self.constants);
-        let enthalpy_feed_d = Mixture::new(FEED_D_COMPOSITION, Phase::Vapor, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
-        let enthalpy_feed_e = Mixture::new(FEED_E_COMPOSITION, Phase::Vapor, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
-        let enthalpy_feed_a = Mixture::new(FEED_A_COMPOSITION, Phase::Vapor, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
+        let enthalpy_flash_vapor = Mixture::new(flash_vapor_composition, &TEP_SPECIES).enthalpy(need::stripper__temperature, 1, &self.constants);
+        let enthalpy_feed_d = Mixture::new(FEED_D_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
+        let enthalpy_feed_e = Mixture::new(FEED_E_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
+        let enthalpy_feed_a = Mixture::new(FEED_A_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_compressor_recycle = compressor_vapor.enthalpy(need::compressor__temperature, 1, &self.constants);
 
         let mut derivative = [0.0f64; 8];
@@ -158,7 +157,7 @@ impl Compressor {
     */
     #[task]
     fn reactor_feed_analysis(&self) {
-        let composition = need::compressor__vapor_composition::<Vapor>;
+        let composition = need::compressor__vapor_composition::<Mixture>;
         offer::xmeas__stream6__component__a = composition.component(0) * 100.0;
         offer::xmeas__stream6__component__b = composition.component(1) * 100.0;
         offer::xmeas__stream6__component__c = composition.component(2) * 100.0;

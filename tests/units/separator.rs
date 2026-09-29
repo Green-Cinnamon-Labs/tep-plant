@@ -1,7 +1,7 @@
 /* Testes de `units::separator`. */
 
 use crate::harness::Harness;
-use monjolo::chemistry::{Mixture, Phase};
+use monjolo::chemistry::{Mixture};
 use monjolo::snapshot::Snapshot;
 use monjolo::state_registry::StateRegistry;
 use tennessee_eastman_process::physics::constants::{TepConstants, TEP_SPECIES};
@@ -118,7 +118,7 @@ fn run_balanced_mass_and_energy_balance(separator_heat: f64) -> Harness {
 
     let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
     let temperature = 100.0;
-    let enthalpy = Mixture::new(composition, Phase::Vapor, &TEP_SPECIES).enthalpy(temperature, 1, &TepConstants::new());
+    let enthalpy = Mixture::new(composition, &TEP_SPECIES).enthalpy(temperature, 1, &TepConstants::new());
 
     harness.seed_mixture("reactor.vapor_composition", &composition);
     harness.seed("reactor.temperature", temperature);

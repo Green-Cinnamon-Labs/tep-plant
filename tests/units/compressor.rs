@@ -1,7 +1,7 @@
 /* Testes de `units::compressor`. */
 
 use crate::harness::Harness;
-use monjolo::chemistry::{Mixture, Phase};
+use monjolo::chemistry::{Mixture};
 use monjolo::snapshot::Snapshot;
 use monjolo::state_registry::StateRegistry;
 use tennessee_eastman_process::physics::constants::{TepConstants, TEP_SPECIES};
@@ -131,7 +131,7 @@ fn mass_and_energy_balance_cancels_when_only_recycle_flow_is_present_and_balance
     let composition = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
     let temperature = 45.0;
     let flow = 300.0;
-    let discharge_enthalpy = Mixture::new(composition, Phase::Vapor, &TEP_SPECIES).enthalpy(temperature, 1, &TepConstants::new());
+    let discharge_enthalpy = Mixture::new(composition, &TEP_SPECIES).enthalpy(temperature, 1, &TepConstants::new());
 
     harness.seed("flows.stream_flow.0", 0.0); /* sem feed fresco */
     harness.seed("flows.stream_flow.1", 0.0);

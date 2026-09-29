@@ -2,7 +2,7 @@
 
 use crate::physics::constants::{TepConstants, TEP_SPECIES};
 use crate::units::feed::FEED_TEMPERATURE;
-use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture, Phase};
+use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture};
 
 const STRIPPER_PRODUCT_RANGE: f64 = 1000.0; /* VRNG (TEINIT) da válvula de produto */
 const STRIPPER_STEAM_RANGE: f64 = 0.03; /* VRNG (TEINIT) da válvula de vapor (UAC) */
@@ -36,7 +36,7 @@ impl Stripper {
     */
     #[task]
     fn physical_state(&self) {
-        let liquid = Mixture::new(self.liquid(), Phase::Liquid, &TEP_SPECIES);
+        let liquid = Mixture::new(self.liquid(), &TEP_SPECIES);
         let liquid_composition = liquid.mole_fractions();
 
         let specific_enthalpy = self.enthalpy() / liquid.total();
@@ -47,7 +47,7 @@ impl Stripper {
         offer::stripper__temperature = temperature;
         offer::stripper__liquid_volume = volume_liquid;
         offer::stripper__liquid_density = density;
-        offer::stripper__liquid_composition::<Liquid> = liquid_composition;
+        offer::stripper__liquid_composition::<Mixture> = liquid_composition;
     }
 
     /* Bloco 2 (ex-Flows, Block 22 slot 12): produto do stripper — puramente linear na válvula,
@@ -68,9 +68,9 @@ impl Stripper {
     fn flash_split(&self) {
         let ac_feed_flow = need::flows__stream_flow__3;
         let underflow_flow = need::flows__stream_flow__10;
-        let separator_liquid = need::separator__liquid_composition::<Liquid>.as_array();
+        let separator_liquid = need::separator__liquid_composition::<Mixture>.as_array();
         let stripper_temperature = need::stripper__temperature;
-        let ac_feed_composition = need::flows__stream4_composition::<Vapor>.as_array();
+        let ac_feed_composition = need::flows__stream4_composition::<Mixture>.as_array();
 
         let mut component_flow_3 = [0.0f64; 8];
         let mut component_flow_10 = [0.0f64; 8];
@@ -120,8 +120,8 @@ impl Stripper {
 
         offer::flows__stream_flow__4 = flow4;
         offer::flows__stream_flow__11 = flow11;
-        offer::flows__flash_vapor_component_flow::<Vapor> = Mixture::new(component_flow_4, Phase::Vapor, &TEP_SPECIES);
-        offer::flows__flash_liquid_component_flow::<Liquid> = Mixture::new(component_flow_11, Phase::Liquid, &TEP_SPECIES);
+        offer::flows__flash_vapor_component_flow::<Mixture> = Mixture::new(component_flow_4, &TEP_SPECIES);
+        offer::flows__flash_liquid_component_flow::<Mixture> = Mixture::new(component_flow_11, &TEP_SPECIES);
     }
 
     /* Bloco 4 (ex-Heat, Block 34 + o UAC de Block 22 — que nunca teve dono próprio além de ser
@@ -141,9 +141,9 @@ impl Stripper {
     */
     #[task]
     fn mass_and_energy_balance(&self) {
-        let flash_liquid_flow = need::flows__flash_liquid_component_flow::<Liquid>;
-        let flash_vapor_flow = need::flows__flash_vapor_component_flow::<Vapor>;
-        let stripper_liquid = need::stripper__liquid_composition::<Liquid>;
+        let flash_liquid_flow = need::flows__flash_liquid_component_flow::<Mixture>;
+        let flash_vapor_flow = need::flows__flash_vapor_component_flow::<Mixture>;
+        let stripper_liquid = need::stripper__liquid_composition::<Mixture>;
         let stripper_temperature = need::stripper__temperature;
         let flow12 = need::flows__stream_flow__12;
         let flow3 = need::flows__stream_flow__3;
@@ -151,8 +151,8 @@ impl Stripper {
         let flow4 = need::flows__stream_flow__4;
         let separator_temperature = need::separator__temperature;
 
-        let enthalpy_feed_ac = need::flows__stream4_composition::<Vapor>.enthalpy(FEED_TEMPERATURE, 1, &self.constants);
-        let enthalpy_separator_liquid = need::separator__liquid_composition::<Liquid>.enthalpy(separator_temperature, 0, &self.constants);
+        let enthalpy_feed_ac = need::flows__stream4_composition::<Mixture>.enthalpy(FEED_TEMPERATURE, 1, &self.constants);
+        let enthalpy_separator_liquid = need::separator__liquid_composition::<Mixture>.enthalpy(separator_temperature, 0, &self.constants);
         let enthalpy_stripper_liquid = stripper_liquid.enthalpy(stripper_temperature, 0, &self.constants);
 
         let flash_vapor_total = flash_vapor_flow.total();
@@ -162,7 +162,7 @@ impl Stripper {
                 flash_vapor_composition[i] = flash_vapor_flow.component(i) / flash_vapor_total;
             }
         }
-        let enthalpy_flash_vapor = Mixture::new(flash_vapor_composition, Phase::Vapor, &TEP_SPECIES).enthalpy(stripper_temperature, 1, &self.constants);
+        let enthalpy_flash_vapor = Mixture::new(flash_vapor_composition, &TEP_SPECIES).enthalpy(stripper_temperature, 1, &self.constants);
 
         let derivative = flash_liquid_flow - stripper_liquid.scaled_by(flow12);
 
@@ -186,7 +186,7 @@ impl Stripper {
     */
     #[task]
     fn product_analysis(&self) {
-        let composition = need::stripper__liquid_composition::<Liquid>;
+        let composition = need::stripper__liquid_composition::<Mixture>;
         offer::xmeas__stream11__component__d = composition.component(3) * 100.0;
         offer::xmeas__stream11__component__e = composition.component(4) * 100.0;
         offer::xmeas__stream11__component__f = composition.component(5) * 100.0;
