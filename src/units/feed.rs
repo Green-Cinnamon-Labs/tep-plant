@@ -43,7 +43,7 @@ impl Feed {
 
     #[task]
     fn ac_feed_composition(&self) {
-        offer::flows__stream4_composition_nominal::<Mixture> = Mixture::new(FEED_AC_COMPOSITION, &TEP_SPECIES);
+        offer::flows__stream4_composition::<Mixture> = Mixture::new(FEED_AC_COMPOSITION, &TEP_SPECIES);
     }
 
     #[task]

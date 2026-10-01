@@ -2,23 +2,18 @@
 
 /** IDV(1) — A/C feed ratio, step (Table 8, Downs & Vogel 1993; `teprob.f`:
 `XST(1,4) -= IDV(1)*0.03`, C absorve a diferença via `XST(3,4) = 1 - XST(1,4) - XST(2,4)`, B
-intocado). Primeira migração pro padrão novo de distúrbio (ver `docs/05-disturbios.md`).
+intocado). Migrado pro mecanismo de INTERCEPTAÇÃO (ver `docs/05-disturbios.md`,
+`monjolo-macros/tasks.rs::build_disturbance_interceptor`) — não existe mais uma chave "_nominal"
+paralela: `Disturbances::idv1` intercepta DIRETO a chave pública que `units::feed::Feed` publica e
+`units::stripper` consome (`flows.stream4_composition.*`), sem que nenhum dos dois saiba que isto
+existe.
 
-`Disturbances::idv1` é o método inteiro: lê a composição NOMINAL publicada por `units::feed::Feed`
-(`flows.stream4_composition_nominal.*`, que não sabe nada disto) e reoferece sob a chave PÚBLICA que
-`units::stripper` de fato consome (`flows.stream4_composition.*`, que também não sabe nada disto) —
-alterada só quando ligado. `#[disturbance(key = "disturbance.idv1")]` (atributo do MÉTODO, junto de
-`#[need]`/`#[offer]` — não do `impl` inteiro, já que `Disturbances` pode ganhar outros métodos/IDVs
-depois, cada um com sua própria chave) faz o método INTEIRO virar também o comando externo
-liga/desliga (`active` chega como o primeiro parâmetro, injetado pela macro — não é um `#[need]`
-escrito à mão): a tarefa gerada implementa `Actuator` e se cataloga sob `"disturbance.idv1"`
-sozinha, ganhando escrita/exposição OPC-UA de graça, sem nenhum `inventory::submit!` separado pra
-manter em sincronia.
-
-NOTA: `tep-plant::disturbance::Disturbance` (`mod.rs`/`state.rs`, o struct antigo de 20 flags) ainda
-existe, mas é código morto — nunca chamado desde a migração pro scheduler de dataflow topológico
-(issue #10) removeu `build_tep()`. Este arquivo NÃO o reaproveita; IDV(1) é migrado do zero pro
-padrão novo. Os outros 19 IDVs migram um a um, em conversas separadas (ver `docs/05-disturbios.md`).
+`#[disturbance(key = "disturbance.idv1", intercepts = "flows.stream4_composition", components =
+[...])]` cataloga o próprio método como o comando externo liga/desliga (`Actuator` sob essa chave,
+exposição OPC-UA automática, igual a qualquer outro atuador). `idv1` é uma função PURA, sem `&self`
+— ela vira um `fn(f64, &[f64]) -> Vec<f64>` sem nenhuma captura, chamado de dentro de `Proxy::get()`
+pra quem pede `need::flows__stream4_composition::<Mixture>` (ex.: `Stripper::flash_split`), sem
+acesso ao `StateRegistry` nem a qualquer instância.
 */
 
 #[monjolo::dynamic_model(tasks)]
@@ -26,14 +21,13 @@ pub struct Disturbances {}
 
 #[monjolo::tasks]
 impl Disturbances {
-
-
-    
-    #[disturbance(key = "disturbance.idv1")]
-    #[need(prefix = "flows.stream4_composition_nominal", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    #[offer(prefix = "flows.stream4_composition", components = ["a", "b", "c", "d", "e", "f", "g", "h"])]
-    fn idv1(&self, active: f64, nominal: [f64; 8]) -> [f64; 8] {
-        let mut composition = nominal;
+    #[disturbance(
+        key = "disturbance.idv1",
+        intercepts = "flows.stream4_composition",
+        components = ["a", "b", "c", "d", "e", "f", "g", "h"]
+    )]
+    fn idv1(active: f64, raw: &[f64]) -> Vec<f64> {
+        let mut composition = raw.to_vec();
         if active != 0.0 {
             composition[0] -= 0.03;
             composition[2] = 1.0 - composition[0] - composition[1];
@@ -49,10 +43,10 @@ mod tests {
     use monjolo::snapshot::Snapshot;
     use monjolo::state_registry::StateRegistry;
 
-    /** Prova o fluxo ponta-a-ponta: `Feed` publica o nominal, `Disturbances::idv1` intercepta e é
-    ao mesmo tempo o comando externo, `Stripper` (e qualquer outro `#[need]` na chave pública) só vê
-    o resultado — desligado, igual ao nominal; ligado, A cai 0.03/C absorve/B intocado; desligado de
-    novo, volta ao nominal.
+    /** Prova o fluxo ponta-a-ponta: `Feed` publica a composição direto na chave pública,
+    `Disturbances::idv1` intercepta e é ao mesmo tempo o comando externo, `Stripper` (e qualquer
+    outro `need::` na chave pública) só vê o resultado — desligado, igual ao nominal; ligado, A cai
+    0.03/C absorve/B intocado; desligado de novo, volta ao nominal.
     */
     #[test]
     fn idv1_step_shifts_a_into_c_leaving_b_untouched_only_while_active() {
