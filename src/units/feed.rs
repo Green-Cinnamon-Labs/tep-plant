@@ -51,6 +51,16 @@ impl Feed {
         offer::flows__d_feed_mol_weight = Mixture::new(FEED_D_COMPOSITION, &TEP_SPECIES).dot(&self.constants.xmw);
     }
 
+    /* Única das quatro temperaturas de feed (D/E/A/A&C, todas `FEED_TEMPERATURE` hoje) publicada
+    como chave própria — é a única que `teprob.f` deixa perturbável (`TST(1) += IDV(3)*5`, ver
+    `disturbance/idv3.rs`). E/A continuam lendo a constante direto; não há IDV pra elas em
+    `teprob.f`, então não há motivo pra publicá-las também (ver docs/05-disturbios.md).
+    */
+    #[task]
+    fn d_feed_temperature(&self) {
+        offer::flows__d_feed_temperature = FEED_TEMPERATURE;
+    }
+
     #[task]
     fn e_feed_mol_weight(&self) {
         offer::flows__e_feed_mol_weight = Mixture::new(FEED_E_COMPOSITION, &TEP_SPECIES).dot(&self.constants.xmw);

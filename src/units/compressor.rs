@@ -86,7 +86,7 @@ impl Compressor {
         let compressor_vapor = need::compressor__vapor_composition::<Mixture>; // COMPOSIÇÃO PRÓPRIA
 
         let enthalpy_flash_vapor = flash_vapor_flow.mole_fractions().enthalpy(need::stripper__temperature, 1, &self.constants);
-        let enthalpy_feed_d = Mixture::new(FEED_D_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
+        let enthalpy_feed_d = Mixture::new(FEED_D_COMPOSITION, &TEP_SPECIES).enthalpy(need::flows__d_feed_temperature, 1, &self.constants);
         let enthalpy_feed_e = Mixture::new(FEED_E_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_feed_a = Mixture::new(FEED_A_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_compressor_recycle = compressor_vapor.enthalpy(need::compressor__temperature, 1, &self.constants);

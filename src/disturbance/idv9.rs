@@ -5,7 +5,7 @@ Ruído randômico na temperatura de entrada de D. Efeito entálpico contínuo so
 Geralmente mais brando que os distúrbios de composição porque a entalpia de D é uma perturbação de
 segunda ordem.
 
-CASCA — ainda não implementado. Mesmo ponto e mesma ressalva do IDV(3) (`FEED_TEMPERATURE`
-compartilhada entre feeds). Mesma lacuna de mecanismo do IDV(8) — precisa de canal cúbico com
-`time`, não cabe numa função pura. Ver `docs/05-disturbios.md`.
+CASCA — ainda não implementado. Mesmo ponto do IDV(3) (`flows.d_feed_temperature`, já separada da
+constante compartilhada — ver `idv3.rs`/`units/feed.rs`). Mesma lacuna de mecanismo do IDV(8) —
+precisa de canal cúbico com `time`, não cabe numa função pura. Ver `docs/05-disturbios.md`.
 */

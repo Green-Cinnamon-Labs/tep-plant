@@ -107,6 +107,7 @@ fn mass_and_energy_balance_cancels_when_only_recycle_flow_is_present_and_balance
     harness.seed("flows.stream_flow.1", 0.0); /* sem feed fresco (stream 1 = A) */
     harness.seed("flows.stream_flow.2", 0.0); /* stream 2 = D */
     harness.seed("flows.stream_flow.3", 0.0); /* stream 3 = E */
+    harness.seed("flows.d_feed_temperature", 45.0); /* multiplicado por flow2=0, valor não importa aqui */
     harness.seed("flows.stream_flow.5", 0.0); /* sem vazão de flash (stream 5, o vetor flash_vapor_flow já é zero) */
     harness.seed("flows.stream_flow.6", flow); /* reciclo saindo (stream 6, reactor feed) */
     harness.seed("flows.stream_flow.8", flow); /* reciclo entrando (stream 8), mesma vazão */
