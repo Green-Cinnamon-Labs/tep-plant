@@ -3,3 +3,5 @@ Só IDVs com mecanismo de verdade (não "casca") ganham arquivo aqui — ver `do
 */
 
 mod idv1;
+mod idv1_and_idv2;
+mod idv2;
