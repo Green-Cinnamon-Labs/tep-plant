@@ -16,33 +16,33 @@ Corrigida abaixo: 16/17/18/20 agora refletem a mecânica real de `teprob.f`; 19 
 não-implementado; 14/15 continuam "válvula travada" (isso SIM está no paper, Table 8), mas como
 categoria de mecanismo estruturalmente diferente — ver nota na seção de IDV(14)/(15) abaixo.
 
-## Onde cada distúrbio entra no código (2026-09-19)
+## Onde cada distúrbio entra no código (atualizado em 2026-09-30, pós-migração pra `#[task]`/`need::`/`offer::` e renumeração de streams — issue #73)
 
-Levantamento feito contra `teprob.f` e o código Rust atual — só localização, nenhuma implementação
-feita ainda.
+Levantamento refeito contra o código Rust atual, linha a linha. Só o IDV(1) está implementado; os
+demais são o LOCAL exato onde cada um entraria, não implementação.
 
-| IDV    | Mecanismo (canal, se houver)                     | Local exato                                              | Nota                                                                                                                             |
-| ------ | ------------------------------------------------ | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| **1**  | A/C ratio, stream 4 (canal 0/1)                  | `units/feed.rs:31`                                       | onde `FEED_AC_COMPOSITION` é DEFINIDA, não onde é consumida — hoje é `const`, precisaria virar task `#[offer]` (mesmo padrão de `ac_feed_flow` no mesmo arquivo) pra ter algo perturbável |
-| **2**  | B composition, stream 4 (canal 0/1)              | `units/feed.rs:31`                                       | mesmo array/local de IDV(1), componente diferente                                                                                |
-| **3**  | D feed temperature, step (canal 2)               | `units/compressor.rs:163`                                | `FEED_TEMPERATURE` é uma constante ÚNICA reusada por D/E/A/A&C — perturbar só D exige separá-la por stream primeiro              |
-| **4**  | Reactor CW inlet temp, step                      | `units/reactor.rs:245-257` (bloco comentado)             | sem fórmula em `teprob.f` (TCWR nunca é lido por ninguém lá) — reintrodução deliberada, ver #72                                  |
-| **5**  | Condenser CW inlet temp, step                    | `units/separator.rs:142-147`                             | mesma lacuna estrutural do IDV(4), lado separador/condensador — ainda não resolvido explicitamente se reintroduz fórmula própria |
-| **6**  | A feed loss                                      | `units/feed.rs:62`                                       | já tem comentário apontando isso (linha 58)                                                                                      |
-| **7**  | C header pressure loss, stream 4                 | `units/feed.rs:72`                                       | já tem comentário apontando isso (linha 65)                                                                                      |
-| **8**  | A/B/C composition random, stream 4 (canal 0/1)   | `units/feed.rs:31`                                       | mesmo local de IDV(1)/(2), perfil aleatório                                                                                      |
-| **9**  | D feed temperature random (canal 2)              | `units/compressor.rs:163`                                | mesmo local de IDV(3), mesma ressalva do `FEED_TEMPERATURE` compartilhado                                                        |
-| **10** | C feed temperature random (canal 3)              | `units/stripper.rs:185`                                  | mesmo `FEED_TEMPERATURE` compartilhado, lado A&C                                                                                 |
-| **11** | Reactor CW inlet temp random                     | `units/reactor.rs:245-257`                               | mesmo local de IDV(4) — mesma variável (`tcwr`), perfil aleatório                                                                |
-| **12** | Condenser CW inlet temp random                   | `units/separator.rs:142-147`                             | mesmo local de IDV(5)                                                                                                            |
-| **13** | Reaction kinetics R1F/R2F                        | `units/reactor.rs:150` e `:151`                          | constantes hoje em `reactor.rs:9-10` (`REACTION_FACTOR_1/2_NOMINAL`)                                                             |
-| **14** | Reactor CW valve sticking                        | `actuators/reactor_cooling_water.rs` (arquivo inteiro)   | sem ponto de interceptação de `write()` hoje — mecanismo não existe ainda, nem no framework (`#[actuator]` em `monjolo-macros`)  |
-| **15** | Condenser CW valve sticking                      | `actuators/condenser_cooling_water.rs` (arquivo inteiro) | mesma observação do IDV(14)                                                                                                      |
-| **16** | UAC — condenser heat transfer coef. (canal 8)    | `units/stripper.rs:145`                                  | `condenser_ua`                                                                                                                   |
-| **17** | QUR — reactor heat removal (canal 9)             | `units/reactor.rs:259`                                   | já tem placeholder `* (1.0 - 0.35 * 0.0)`, comentário já corrigido                                                               |
-| **18** | QUS — separator heat removal (canal 10)          | `units/separator.rs:144`                                 | placeholder `* (1.0 - 0.25 * 0.0)`                                                                                               |
-| **19** | —                                                | —                                                        | não implementar (sem fórmula em `teprob.f`)                                                                                      |
-| **20** | Coeficiente de vazão reator→separador (canal 11) | `units/reactor.rs:203`                                   | placeholder `* (1.0 - 0.25 * 0.0)`                                                                                               |
+| IDV    | Mecanismo                                        | Local exato                                                                             | Nota                                                                                                                            |
+| ------ | ------------------------------------------------ | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **1**  | A/C ratio, stream 4                              | [src/disturbance/idv1.rs:35-42](../src/disturbance/idv1.rs#L35-L42) | **Já implementado.** Intercepta a oferta de [units/feed.rs:46](../src/units/feed.rs#L46) e reoferta sob a chave pública que [units/stripper.rs:55](../src/units/stripper.rs#L55) lê |
+| **2**  | B composition, stream 4                          | [units/feed.rs:46](../src/units/feed.rs#L46) | mesmo ponto de interceptação do IDV(1) (a task `ac_feed_composition`), componente B em vez de A/C |
+| **3**  | D feed temperature, step                         | [units/feed.rs:15](../src/units/feed.rs#L15) (`FEED_TEMPERATURE`), consumida em [units/compressor.rs:89](../src/units/compressor.rs#L89) | `FEED_TEMPERATURE` é uma constante ÚNICA reusada por D/E/A/A&C — perturbar só D exige separá-la por feed primeiro |
+| **4**  | Reactor CW inlet temp, step                      | [units/reactor.rs:116](../src/units/reactor.rs#L116) (`let twr = REACTOR_COOLING_WATER_RETURN;`) | sem efeito possível hoje — `twr` é constante congelada desde o Exp 24, não depende de `tcwr` nenhum; ver nota abaixo |
+| **5**  | Condenser CW inlet temp, step                    | [units/separator.rs:68-69](../src/units/separator.rs#L68-L69) | mesma lacuna estrutural do IDV(4), lado separador |
+| **6**  | A feed loss                                      | [units/feed.rs:36](../src/units/feed.rs#L36) (`a_feed_flow`) | fechar a válvula de A é interceptar essa vazão |
+| **7**  | C header pressure loss, stream 4                 | [units/feed.rs:41](../src/units/feed.rs#L41) (`ac_feed_flow`) | reduz a vazão combinada A&C inteira, não só C isoladamente — mesma limitação de sempre |
+| **8**  | A/B/C composition random, stream 4               | [units/feed.rs:46](../src/units/feed.rs#L46) | mesmo ponto de IDV(1)/(2), perfil aleatório em vez de step |
+| **9**  | D feed temperature random                        | [units/feed.rs:15](../src/units/feed.rs#L15), consumida em [units/compressor.rs:89](../src/units/compressor.rs#L89) | mesmo ponto e mesma ressalva do IDV(3) |
+| **10** | C feed temperature random, stream 4              | [units/feed.rs:15](../src/units/feed.rs#L15), consumida em [units/stripper.rs:109](../src/units/stripper.rs#L109) | mesmo `FEED_TEMPERATURE` compartilhado, lado A&C |
+| **11** | Reactor CW inlet temp random                     | [units/reactor.rs:116](../src/units/reactor.rs#L116) | mesmo ponto e mesma lacuna do IDV(4) |
+| **12** | Condenser CW inlet temp random                   | [units/separator.rs:68-69](../src/units/separator.rs#L68-L69) | mesmo ponto do IDV(5) |
+| **13** | Reaction kinetics R1F/R2F                        | [units/reactor.rs:8-9](../src/units/reactor.rs#L8-L9) (constantes), usadas em [L21](../src/units/reactor.rs#L21) e [L32](../src/units/reactor.rs#L32) (dentro de `REACTIONS`) | `REACTION_FACTOR_1/2_NOMINAL` |
+| **14** | Reactor CW valve sticking                        | [src/actuators/reactor_cooling_water.rs](../src/actuators/reactor_cooling_water.rs) (arquivo inteiro) | sem ponto de interceptação de `write()` hoje — mecanismo não existe ainda |
+| **15** | Condenser CW valve sticking                      | [src/actuators/condenser_cooling_water.rs](../src/actuators/condenser_cooling_water.rs) (arquivo inteiro) | mesma observação do IDV(14) |
+| **16** | UAC — condenser heat transfer coef.              | [units/stripper.rs:92](../src/units/stripper.rs#L92) (`condenser_ua`) | — |
+| **17** | QUR — reactor heat removal                       | [units/reactor.rs:118](../src/units/reactor.rs#L118) (`* (1.0 - 0.35 * 0.0)`) | placeholder já existe |
+| **18** | QUS — separator heat removal                     | [units/separator.rs:68](../src/units/separator.rs#L68) (`* (1.0 - 0.25 * 0.0)`) | placeholder já existe |
+| **19** | —                                                 | —                                                                                          | não implementar (sem fórmula em `teprob.f`)                                                                                     |
+| **20** | Coeficiente de vazão reator→separador             | [units/reactor.rs:101](../src/units/reactor.rs#L101) (`* (1.0 - 0.25 * 0.0)`) | placeholder já existe |
 
 ---
 
