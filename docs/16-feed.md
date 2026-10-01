@@ -4,7 +4,7 @@ Este documento reúne o que antes estava em comentários dentro de `feed.rs`. O 
 
 ## Origem
 
-O Feed foi migrado do antigo `dynamics/flows.rs` (issue 10). Antes, essas 4 vazões e os 2 pesos moleculares eram calculados dentro de `Flows::compute()`, sem nenhum dono próprio. As chaves publicadas (`flows.stream_flow.0..3`, `flows.d_feed_mol_weight`/`.e_feed_mol_weight`) continuam exatamente as mesmas — só quem as publica mudou.
+O Feed foi migrado do antigo `dynamics/flows.rs` (issue 10). Antes, essas 4 vazões e os 2 pesos moleculares eram calculados dentro de `Flows::compute()`, sem nenhum dono próprio. As chaves publicadas hoje são `flows.stream_flow.1` (A), `.2` (D), `.3` (E) e `.4` (A&C) — o número de cada uma é o número canônico do stream no artigo original (Downs & Vogel 1993), não a ordem em que os métodos aparecem neste arquivo. Isso foi corrigido em 2026-09-30: antes, essas chaves usavam a posição interna do array `FTM` do `teprob.f` (0/1/2/3, na ordem D/E/A/A&C), que não bate com o número do artigo — ver `flows.d_feed_mol_weight`/`.e_feed_mol_weight` para os pesos moleculares, que não têm número de stream próprio.
 
 ## Constantes
 

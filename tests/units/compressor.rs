@@ -89,36 +89,7 @@ fn physical_state_matches_nominal_operating_point_from_application_toml() {
     );
 }
 
-/* `outlet_flows`: `flow6` é definido como cópia bit-a-bit de `flow5` (Block 31 do teprob.f,
-"bypass") — um invariante estrutural fácil de quebrar sem querer numa refatoração futura
-(ex.: trocar `flow6` por outra fórmula por engano). Barato de testar, caro de deixar passar.
-*/
-#[test]
-fn outlet_flows_bypass_is_an_exact_copy_of_recycle_flow() {
-    let harness = Harness::new();
-    let _compressor = harness.unit(|registry| Compressor::new(registry, &Snapshot::from_pairs(&[])));
-
-    let separator_vapor = [0.1, 0.05, 0.1, 0.05, 0.2, 0.1, 0.2, 0.2];
-    harness.seed("compressor.pressure", 25000.0); /* compressor_pressure (mmHg) */
-    harness.seed("reactor.pressure", 21000.0);
-    harness.seed("separator.pressure", 20000.0);
-    harness.seed("separator.temperature", 80.1);
-    harness.seed_mixture("separator.vapor_composition", &separator_vapor);
-    harness.seed_mixture("compressor.vapor_composition", &separator_vapor); /* mesma composição só pra simplificar o teste */
-    harness.seed("valve.compressor_recycle.position", 22.21); /* nominal, docs/07-controle.md */
-
-    let task = harness.task("Compressor::outlet_flows");
-    harness.resolve();
-    task.evaluate();
-
-    assert_eq!(
-        harness.read("flows.stream_flow.6"),
-        harness.read("flows.stream_flow.5"),
-        "flow6 (bypass) deveria ser sempre uma cópia exata de flow5 (recycle)"
-    );
-}
-
-/* `mass_and_energy_balance`: com feeds frescos zerados (flow0/1/2=0), sem vapor de flash
+/* `mass_and_energy_balance`: com feeds frescos zerados (streams 1/2/3=0), sem vapor de flash
 (flash_vapor_flow=0) e o reciclo balanceado (mesma composição/entalpia entrando e saindo, na
 mesma vazão), nada deveria se acumular — mesma técnica de "fluxo balanceado" já usada nos
 testes de `Reactor::mass_and_energy_balance`.
@@ -133,12 +104,12 @@ fn mass_and_energy_balance_cancels_when_only_recycle_flow_is_present_and_balance
     let flow = 300.0;
     let discharge_enthalpy = Mixture::new(composition, &TEP_SPECIES).enthalpy(temperature, 1, &TepConstants::new());
 
-    harness.seed("flows.stream_flow.0", 0.0); /* sem feed fresco */
-    harness.seed("flows.stream_flow.1", 0.0);
-    harness.seed("flows.stream_flow.2", 0.0);
-    harness.seed("flows.stream_flow.4", 0.0); /* sem vazão de flash (o vetor flash_vapor_flow já é zero) */
-    harness.seed("flows.stream_flow.5", flow); /* reciclo saindo */
-    harness.seed("flows.stream_flow.8", flow); /* reciclo entrando, mesma vazão */
+    harness.seed("flows.stream_flow.1", 0.0); /* sem feed fresco (stream 1 = A) */
+    harness.seed("flows.stream_flow.2", 0.0); /* stream 2 = D */
+    harness.seed("flows.stream_flow.3", 0.0); /* stream 3 = E */
+    harness.seed("flows.stream_flow.5", 0.0); /* sem vazão de flash (stream 5, o vetor flash_vapor_flow já é zero) */
+    harness.seed("flows.stream_flow.6", flow); /* reciclo saindo (stream 6, reactor feed) */
+    harness.seed("flows.stream_flow.8", flow); /* reciclo entrando (stream 8), mesma vazão */
     harness.seed_mixture("flows.flash_vapor_component_flow", &[0.0; 8]); /* sem vapor de flash */
     harness.seed_mixture("separator.vapor_composition", &composition); /* mesma composição do compressor */
     harness.seed("stripper.temperature", temperature); /* não importa aqui (flash_vapor_flow=0) */

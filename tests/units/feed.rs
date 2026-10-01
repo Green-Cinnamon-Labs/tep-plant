@@ -33,7 +33,7 @@ fn linear_valve_flows_match_hand_computed_values() {
 
     let (_, needed) = registry.borrow_mut().subscribe(
         &[],
-        &["flows.stream_flow.0", "flows.stream_flow.1", "flows.stream_flow.2", "flows.stream_flow.3"],
+        &["flows.stream_flow.2", "flows.stream_flow.3", "flows.stream_flow.1", "flows.stream_flow.4"],
     );
     registry.borrow_mut().resolve().expect("chaves já ofertadas deveriam resolver de novo sem erro");
 

@@ -49,11 +49,10 @@ impl Compressor {
         let separator_vapor = need::separator__vapor_composition::<Mixture>;
         let compressor_vapor = need::compressor__vapor_composition::<Mixture>;
 
-        let mw5 = compressor_vapor.dot(&self.constants.xmw);
+        let mw6 = compressor_vapor.dot(&self.constants.xmw);
         let mw8 = separator_vapor.dot(&self.constants.xmw);
 
-        let flow5 = 1937.6 * (compressor_pressure - need::reactor__pressure).max(0.0).sqrt() / mw5;
-        let flow6 = flow5;
+        let flow6 = 1937.6 * (compressor_pressure - need::reactor__pressure).max(0.0).sqrt() / mw6;
 
         let pressure_ratio = (compressor_pressure / separator_pressure).max(1.0).min(COMPRESSOR_PRESSURE_RATIO_MAX);
         let flow_coeff = COMPRESSOR_FLOW_MAX / 1.197;
@@ -68,7 +67,6 @@ impl Compressor {
         let separator_vapor_enthalpy = separator_vapor.enthalpy(separator_temperature, 1, &self.constants);
         let compressor_discharge_enthalpy = separator_vapor_enthalpy + compressor_work / flow8;
 
-        offer::flows__stream_flow__5 = flow5;
         offer::flows__stream_flow__6 = flow6;
         offer::flows__stream_flow__8 = flow8;
         offer::flows__compressor_work = compressor_work;
@@ -77,53 +75,44 @@ impl Compressor {
 
     #[task]
     fn mass_and_energy_balance(&self) {
-        let flow0 = need::flows__stream_flow__0;
-        let flow1 = need::flows__stream_flow__1;
-        let flow2 = need::flows__stream_flow__2;
-        let flow4 = need::flows__stream_flow__4;
-        let flow5 = need::flows__stream_flow__5;
-        let flow8 = need::flows__stream_flow__8;
-        let flash_vapor_flow = need::flows__flash_vapor_component_flow::<Mixture>;
-        let separator_vapor = need::separator__vapor_composition::<Mixture>;
-        let compressor_vapor = need::compressor__vapor_composition::<Mixture>;
+        let flow2 = need::flows__stream_flow__2; // FEED D
+        let flow3 = need::flows__stream_flow__3; // FEED E
+        let flow1 = need::flows__stream_flow__1; // FEED A
+        let flow5 = need::flows__stream_flow__5; // VAPOR DO STRIPPER
+        let flow6 = need::flows__stream_flow__6; // RECICLO PRO REATOR
+        let flow8 = need::flows__stream_flow__8; // RECICLO DO SEPARADOR
+        let flash_vapor_flow = need::flows__flash_vapor_component_flow::<Mixture>; // COMPOSIÇÃO DO STRIPPER
+        let separator_vapor = need::separator__vapor_composition::<Mixture>; // COMPOSIÇÃO DO SEPARADOR
+        let compressor_vapor = need::compressor__vapor_composition::<Mixture>; // COMPOSIÇÃO PRÓPRIA
 
-        let flash_vapor_total = flash_vapor_flow.total();
-        let mut flash_vapor_composition = [0.0f64; 8];
-        if flash_vapor_total > 0.0 {
-            for i in 0..8 {
-                flash_vapor_composition[i] = flash_vapor_flow.component(i) / flash_vapor_total;
-            }
-        }
-        let enthalpy_flash_vapor = Mixture::new(flash_vapor_composition, &TEP_SPECIES).enthalpy(need::stripper__temperature, 1, &self.constants);
+        let enthalpy_flash_vapor = flash_vapor_flow.mole_fractions().enthalpy(need::stripper__temperature, 1, &self.constants);
         let enthalpy_feed_d = Mixture::new(FEED_D_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_feed_e = Mixture::new(FEED_E_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_feed_a = Mixture::new(FEED_A_COMPOSITION, &TEP_SPECIES).enthalpy(FEED_TEMPERATURE, 1, &self.constants);
         let enthalpy_compressor_recycle = compressor_vapor.enthalpy(need::compressor__temperature, 1, &self.constants);
 
-        let mut derivative = [0.0f64; 8];
-        for i in 0..8 {
-            derivative[i] = FEED_D_COMPOSITION[i] * flow0
-                + FEED_E_COMPOSITION[i] * flow1
-                + FEED_A_COMPOSITION[i] * flow2
-                + flash_vapor_flow.component(i)
-                + separator_vapor.component(i) * flow8
-                - compressor_vapor.component(i) * flow5;
-        }
+        let derivative = Mixture::new(FEED_D_COMPOSITION, &TEP_SPECIES).scaled_by(flow2)
+            + Mixture::new(FEED_E_COMPOSITION, &TEP_SPECIES).scaled_by(flow3)
+            + Mixture::new(FEED_A_COMPOSITION, &TEP_SPECIES).scaled_by(flow1)
+            + flash_vapor_flow
+            + separator_vapor.scaled_by(flow8)
+            - compressor_vapor.scaled_by(flow6);
 
-        offer::compressor__state__0__derivative = derivative[0];
-        offer::compressor__state__1__derivative = derivative[1];
-        offer::compressor__state__2__derivative = derivative[2];
-        offer::compressor__state__3__derivative = derivative[3];
-        offer::compressor__state__4__derivative = derivative[4];
-        offer::compressor__state__5__derivative = derivative[5];
-        offer::compressor__state__6__derivative = derivative[6];
-        offer::compressor__state__7__derivative = derivative[7];
-        offer::compressor__state__8__derivative = enthalpy_feed_d * flow0
-            + enthalpy_feed_e * flow1
-            + enthalpy_feed_a * flow2
-            + enthalpy_flash_vapor * flow4
+        offer::compressor__state__0__derivative = derivative.component(0);
+        offer::compressor__state__1__derivative = derivative.component(1);
+        offer::compressor__state__2__derivative = derivative.component(2);
+        offer::compressor__state__3__derivative = derivative.component(3);
+        offer::compressor__state__4__derivative = derivative.component(4);
+        offer::compressor__state__5__derivative = derivative.component(5);
+        offer::compressor__state__6__derivative = derivative.component(6);
+        offer::compressor__state__7__derivative = derivative.component(7);
+        offer::compressor__state__8__derivative = enthalpy_feed_d * flow2
+            + enthalpy_feed_e * flow3
+            + enthalpy_feed_a * flow1
+            + enthalpy_flash_vapor * flow5
             + need::flows__compressor_discharge_enthalpy * flow8
-            - enthalpy_compressor_recycle * flow5;
+            - enthalpy_compressor_recycle * flow6;
+
     }
 
     #[task]
@@ -140,7 +129,7 @@ impl Compressor {
     #[task]
     fn xmeas_readings(&self) {
         offer::xmeas__stream8__flow_rate = need::flows__stream_flow__8 * 0.359 / 35.3145;
-        offer::xmeas__stream6__flow_rate = need::flows__stream_flow__5 * 0.359 / 35.3145;
+        offer::xmeas__stream6__flow_rate = need::flows__stream_flow__6 * 0.359 / 35.3145;
         offer::xmeas__stripper__pressure = (need::compressor__pressure - 760.0) / 760.0 * 101.325;
         offer::xmeas__compressor__work = need::flows__compressor_work * 0.29307e3;
     }
