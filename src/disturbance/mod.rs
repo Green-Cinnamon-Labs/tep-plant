@@ -1,11 +1,20 @@
 /* tep/disturbance/mod.rs */
 
-/* NOTA (2026-10-01): este arquivo já hospedou um `Disturbance` (singular) de canal cúbico/pulso —
+/** Distúrbios por INTERCEPTAÇÃO (issue spec-tennessee-eastman#73) — mesmo padrão de `#[actuator]`/
+`#[sensor]`/`#[controller]`: cada `idvN.rs` declara seu PRÓPRIO struct sem campos (`Idv1`, `Idv2`,
+...), anotado `#[monjolo::disturbance(key = "...", intercepts = "...", [components = [...]])]`, e
+um `impl` à parte com um método convencional, `disturb(&self)` (sem parâmetro — lê via `self.raw()`,
+escreve via o retorno). Ver `docs/05-disturbios.md` e `docs/17-disturbio-por-interceptacao.md`.
+
+NOTA (2026-10-01): este arquivo já hospedou um `Disturbance` (singular) de canal cúbico/pulso —
 código morto desde a migração pro scheduler de dataflow topológico (issue #10), nunca chamado,
 apagado nesta data (ver histórico do git se precisar recuperar algo). Os IDVs "aleatório"/"deriva
 lenta" (8-13, 16-18, 20) vão precisar de uma mecânica equivalente (canal com `time`, estado que
 avança por tick), ainda a reconstruir sob o padrão novo quando chegar a vez deles — a interceptação
-atual (ver `Disturbances`, abaixo) só suporta funções PURAS.
+atual só suporta um método PURO (`disturb(&self)`, só lê o que `raw()`/`active()` já expõem).
+
+Este arquivo NÃO declara mais um struct `Disturbances` compartilhado — cada IDV é um TIPO próprio,
+"impl com o nome do distúrbio", não um método a mais num struct genérico.
 */
 
 pub mod idv1;
@@ -28,22 +37,3 @@ pub mod idv17;
 pub mod idv18;
 pub mod idv19;
 pub mod idv20;
-
-/** Dona de todos os `#[disturbance(...)]` por INTERCEPTAÇÃO (issue spec-tennessee-eastman#73) — um
-`impl Disturbances { ... }` por arquivo (`idv1.rs`, `idv2.rs`, ...), cada um com seu próprio método
-`#[disturbance(key = "...", intercepts = "...", [components = [...]])]`. O struct em si não guarda
-estado nenhum (`{}`) — não é usado por essa parte do mecanismo (`registry.instance::<Disturbances>(
-...)` nunca é chamado pra um `#[disturbance]` sozinho, sem `#[need]`/`#[offer]` empilhado; ver
-`monjolo-macros/macros/tasks.rs::build_disturbance_interceptor`); existe só como ponto de ancoragem
-pra macro, que precisa de um `impl TIPO { ... }` real pra se anexar.
-
-Cada método marcado é uma função PURA, sem `&self` — vira um `fn(f64, &[f64]) -> Vec<f64>` sem
-nenhuma captura, chamado de dentro de `Proxy::get()` pra quem lê a chave interceptada (`need::`),
-sem acesso ao `StateRegistry` nem a qualquer instância. `key` cataloga o próprio método como o
-comando externo liga/desliga (`Actuator`, exposição OPC-UA automática); `intercepts`/`components` é
-a chave (ou prefixo de uma `Mixture`) que passa a ser lida já transformada — quem publica (`offer::`)
-e quem consome (`need::`) nunca sabem que isto existe. Ver `docs/05-disturbios.md` e
-`docs/17-disturbio-por-interceptacao.md`.
-*/
-#[monjolo::dynamic_model(tasks)]
-pub struct Disturbances {}

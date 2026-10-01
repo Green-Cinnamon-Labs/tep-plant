@@ -2,7 +2,7 @@
 
 use monjolo::snapshot::Snapshot;
 use monjolo::state_registry::StateRegistry;
-use tennessee_eastman_process::disturbance::Disturbances;
+use tennessee_eastman_process::disturbance::idv1::Idv1;
 
 /* Valor nominal de `FEED_AC_COMPOSITION` em `units/feed.rs` (`pub(crate)`, não visível daqui —
 mesma convenção de `tests/units/feed.rs`: literal, não o const privado do módulo). */
@@ -10,18 +10,13 @@ const FEED_AC_COMPOSITION: [f64; 8] = [0.4850, 0.0050, 0.5100, 0.0, 0.0, 0.0, 0.
 
 /** Prova a interceptação isolada, sem construir o `Feed` real nem a planta inteira: semeia
 `flows.stream4_composition.*` direto (é só uma chave já ofertada, não importa quem a ofertou de
-verdade) e constrói só a tarefa `Disturbances::idv1` pelo nome — igual `Harness::task` faz em
-`tests/units/`, só que sem depender daquele helper (crate de teste separado). Prova: desligado,
-`need::` enxerga o valor cru; ligado, A cai 0.03/C absorve/B intocado — sem nenhum `evaluate()`,
-porque a troca acontece dentro do `Proxy`, resolvida uma vez em `resolve()`, nunca por tick.
+verdade) e constrói só `Idv1` diretamente (`pub struct`/`pub fn new` — nenhuma necessidade de
+passar por `inventory`/`attach_discovered_components` aqui). Prova: desligado, `need::` enxerga o
+valor cru; ligado, A cai 0.03/C absorve/B intocado — sem nenhum `evaluate()`, porque a troca
+acontece dentro do `Proxy`, resolvida uma vez em `resolve()`, nunca por tick.
 */
 #[test]
 fn idv1_step_shifts_a_into_c_leaving_b_untouched_only_while_active() {
-    /* Força o linker a manter o objeto compilado de `idv1.rs` neste binário de teste separado —
-    sem isso, nada aqui referencia `Disturbances::idv1` e o `inventory::submit!` que a macro gera
-    ao lado dele nunca entra no link (mesmo truque de `tests/units/feed.rs` com `Feed::new`). */
-    let _keep_linked: fn(f64, &[f64]) -> Vec<f64> = Disturbances::idv1;
-
     let registry = StateRegistry::shared();
 
     let keys = ["a", "b", "c", "d", "e", "f", "g", "h"].map(|c| format!("flows.stream4_composition.{c}"));
@@ -31,10 +26,7 @@ fn idv1_step_shifts_a_into_c_leaving_b_untouched_only_while_active() {
         proxy.set(*value);
     }
 
-    let descriptor = monjolo::inventory::iter::<monjolo::ComponentDescriptor>()
-        .find(|d| d.name == "Disturbances::idv1")
-        .expect("Disturbances::idv1 deveria estar registrada no inventory");
-    (descriptor.construct)(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
+    Idv1::new(&mut registry.borrow_mut(), &Snapshot::from_pairs(&[]));
 
     registry.borrow_mut().resolve().expect("todo input deveria ter provedor");
 
@@ -55,7 +47,7 @@ fn idv1_step_shifts_a_into_c_leaving_b_untouched_only_while_active() {
     let idv1 = registry
         .borrow()
         .actuator("disturbance.idv1")
-        .expect("Disturbances::idv1 deveria ter se catalogado sozinha como Actuator");
+        .expect("Idv1 deveria ter se catalogado sozinha como Actuator");
     idv1.write(1.0);
     assert!((needed[0].get() - (FEED_AC_COMPOSITION[0] - 0.03)).abs() < 1e-12, "IDV1 ligado: A cai 0.03");
     assert_eq!(needed[1].get(), FEED_AC_COMPOSITION[1], "IDV1 ligado: B continua intocado");
