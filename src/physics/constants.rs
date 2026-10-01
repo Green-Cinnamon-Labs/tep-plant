@@ -15,6 +15,11 @@ nenhum site de chamada — só o `impl Default` mora aqui, não o `impl Deref` s
 */
 pub struct TepConstants(monjolo::chemistry::Coefficients<8>);
 
+/** Catálogo de nomes dos 8 componentes do TEP, na mesma ordem de indexação acima — o que cada
+`monjolo::chemistry::Mixture<8>` do processo aponta pra saber o nome de cada posição.
+*/
+pub const TEP_SPECIES: monjolo::chemistry::Species<8> = ["A", "B", "C", "D", "E", "F", "G", "H"];
+
 impl TepConstants {
     /** Inicializa todas as constantes com os valores do TEINIT (teprob.f) */
     pub fn new() -> Self {
