@@ -14,4 +14,7 @@ observável, e foi revertida duas vezes por instabilidade térmica real — até
 Exp 24. Dar efeito real a este IDV exige reintroduzir essa fórmula, desta vez com uma malha de
 controle de água de resfriamento do reator adequada (nenhuma das três tentativas anteriores tinha).
 Rastreado na epic #71. Ver `docs/05-disturbios.md`.
+
+TODO: reintroduzir `twr = f(tcwr, ...)` com uma malha de controle de água de resfriamento do
+reator de verdade — só então implementar o `#[monjolo::disturbance]` deste IDV tem efeito real.
 */

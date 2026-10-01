@@ -6,4 +6,7 @@ no separador, aumenta a fração de vapor no reciclo e eleva a carga sobre o com
 
 CASCA — ainda não implementado. Ponto de interceptação: `units/separator.rs`. Mesma lacuna
 estrutural do IDV(4), lado separador — ver `idv4.rs`. Ver `docs/05-disturbios.md`.
+
+TODO: reintroduzir `tws = f(tcws, ...)` com uma malha de controle de água de resfriamento do
+condensador de verdade — só então implementar o `#[monjolo::disturbance]` deste IDV tem efeito real.
 */
