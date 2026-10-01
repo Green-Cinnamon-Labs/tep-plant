@@ -8,4 +8,7 @@ segunda ordem.
 CASCA — ainda não implementado. Mesmo ponto do IDV(3) (`flows.d_feed_temperature`, já separada da
 constante compartilhada — ver `idv3.rs`/`units/feed.rs`). Mesma lacuna de mecanismo do IDV(8) —
 precisa de canal cúbico com `time`, não cabe numa função pura. Ver `docs/05-disturbios.md`.
+
+TODO: mesmo canal cúbico pendente do IDV(8) — assim que existir, este IDV é só plugar nele sobre
+`flows.d_feed_temperature` (a chave já existe, diferente do IDV(8)).
 */

@@ -7,4 +7,7 @@ separação e a temperatura do separador (XMEAS(11)).
 CASCA — ainda não implementado. Ponto de interceptação: `units/separator.rs` — mesmo ponto do
 IDV(5). Mesma lacuna de mecanismo do IDV(8)-(11) — precisa de canal cúbico com `time`. Ver
 `docs/05-disturbios.md`.
+
+TODO: dois bloqueios — (1) canal cúbico pendente (IDV(8)); (2) malha `tws = f(tcws, ...)` com
+controle de água de resfriamento do condensador de verdade, mesmo TODO do IDV(5).
 */

@@ -6,8 +6,11 @@ rejeitar do que distúrbios em step porque não tem ponto de operação estacion
 exige malhas de controle robustas a variação persistente.
 
 CASCA — ainda não implementado. Mesmo ponto de IDV(1)/(2) (`flows.stream4_composition`), perfil
-aleatório em vez de step. **Não cabe no mecanismo de interceptação atual** (`#[disturbance(...)]`
-sozinho é uma função PURA de `(active, valor cru)` — "aleatório" precisa de `time` e de estado que
-avança por tick, a mesma mecânica de canal cúbico contínuo que `state.rs`/`Disturbance` (código
-morto, ver `mod.rs`) já tem, ainda não portada pro padrão novo). Ver `docs/05-disturbios.md`.
+aleatório em vez de step. **Não cabe no `#[monjolo::disturbance]` atual** — `disturb(&self)` é uma
+função PURA, sem estado que avança por tick; "aleatório" precisa de `time` e de um canal cúbico
+contínuo (mecânica que existiu em `Disturbance`/`state.rs`, código morto apagado nesta issue — ver
+`mod.rs`), ainda não reconstruída sob o padrão novo. Ver `docs/05-disturbios.md`.
+
+TODO: desenhar e implementar um mecanismo de canal cúbico (com `time`, estado que avança por
+tick) compatível com `#[monjolo::disturbance]`, antes de implementar este IDV.
 */

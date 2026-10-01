@@ -10,4 +10,7 @@ CASCA — ainda não implementado. Ponto de interceptação: `units/reactor.rs`
 interceptação atual nem no canal cúbico dos demais "aleatórios"** — "deriva lenta" precisa de
 estado que ACUMULA ao longo de horas (não um perfil de ruído de curto prazo), mecanismo ainda a
 definir. Ver `docs/05-disturbios.md`.
+
+TODO: desenhar um mecanismo de deriva ACUMULATIVA (estado que avança com `time`, sem reset, horas
+de horizonte) — diferente do canal cúbico dos demais "aleatórios", ainda a definir.
 */

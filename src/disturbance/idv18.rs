@@ -8,4 +8,7 @@ do separador em vez do reator.
 CASCA — ainda não implementado. Ponto de interceptação: `units/separator.rs` (linha 68, mesmo
 padrão de placeholder do IDV(17)). Mesma lacuna de mecanismo — precisa de canal de pulso com `time`.
 Ver `docs/05-disturbios.md`.
+
+TODO: mesmos dois bloqueios do IDV(17) (canal de pulso pendente + literal `0.0` precisa virar
+chave publicada), lado separador.
 */

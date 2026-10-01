@@ -9,4 +9,7 @@ CASCA — ainda não implementado, E sem efeito possível hoje mesmo se implemen
 (`tcwr`) e mesma lacuna do IDV(4) — `twr` está congelada desde o Exp 24, sem depender de `tcwr`
 nenhum (ver `idv4.rs`). Soma-se a lacuna de mecanismo do IDV(8)/(9)/(10) — precisa de canal cúbico
 com `time`. Ver `docs/05-disturbios.md`.
+
+TODO: dois bloqueios — (1) canal cúbico pendente (IDV(8)); (2) malha `twr = f(tcwr, ...)` com
+controle de água de resfriamento do reator de verdade, mesmo TODO do IDV(4).
 */

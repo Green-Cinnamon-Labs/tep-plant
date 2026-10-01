@@ -9,4 +9,7 @@ CASCA — ainda não implementado, mas **já tem um placeholder no código**: `u
 `flow_to_separator()`: `... * (1.0 - 0.25 * 0.0) / mol_weight` — o `0.0` é onde este canal entra.
 Mesma lacuna de mecanismo dos demais "aleatórios" — precisa de canal de pulso com `time`. Ver
 `docs/05-disturbios.md`.
+
+TODO: mesmos dois bloqueios do IDV(17)/(18) (canal de pulso pendente + literal `0.0` precisa
+virar chave publicada), lado vazão reator→separador.
 */

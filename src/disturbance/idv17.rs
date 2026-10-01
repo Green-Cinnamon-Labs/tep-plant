@@ -10,4 +10,7 @@ CASCA — ainda não implementado, mas **já tem um placeholder no código**: `u
 `heat_exchange()`: `uar * (twr - reactor_temperature) * (1.0 - 0.35 * 0.0)` — o `0.0` é onde este
 canal entra. Mesma lacuna de mecanismo dos demais "aleatórios" — precisa de canal de pulso com
 `time`. Ver `docs/05-disturbios.md`.
+
+TODO: dois bloqueios — (1) canal de pulso pendente (variante do canal do IDV(8)); (2) o `0.0` em
+`reactor.rs` é um literal, precisa virar uma chave publicada antes de ter o que interceptar.
 */
