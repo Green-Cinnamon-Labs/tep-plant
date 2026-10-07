@@ -15,9 +15,12 @@ Nomes seguem `xmeas.<local>.<grandeza>`, onde `<local>` é a STREAM FÍSICA do T
 XMEAS) pras medições de vazão sem unidade própria, ou o nome do vaso pras medições locais —
 verificado contra o cabeçalho de `docs/fortran-original/teprob.f:122-143`.
 
-Todos usam `Ideal` (sem ruído) por enquanto — `#[sensor(...)]` ainda não aceita escolher
-`Noisy`/`Hysteresis`; os desvios-padrão reais por variável estão documentados em
-`docs/06-ruidos.md`, pra quando isso entrar em escopo.
+Cada XMEAS tem ruído gaussiano com o desvio padrão de Downs & Vogel (`XNS` de `teprob.f`,
+tabela em `docs/06-ruidos.md`), declarado no próprio atributo: `#[monjolo::sensor(key = "...",
+noise = σ)]` → `Noisy` (issue spec-tennessee-eastman#66). A semente vem da `key`, então a rodada é
+reproduzível. `status.shutdown_detected` não é medição e fica `Ideal`. Ainda não modelado: a
+amostragem dos analisadores (XMEAS 23–36 a cada 0.1 h, 37–41 a cada 0.25 h, segurando o valor entre
+amostras) — aqui as composições são contínuas.
 */
 
 mod a_feed;

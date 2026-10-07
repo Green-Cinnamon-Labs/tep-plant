@@ -7,5 +7,5 @@ um transmissor de pressão de verdade nunca reportaria isso direto, só o valor 
 convertido pro padrão XMEAS. Descoberto porque `ReactorPressureControl` (Kp=0.1, setpoint=2705)
 saturava a válvula de purge com a leitura em mmHg (~20000+) em vez de kPa (~2700).
 */
-#[monjolo::sensor(key = "xmeas.reactor.pressure")]
+#[monjolo::sensor(key = "xmeas.reactor.pressure", noise = 0.3)]
 pub struct ReactorPressure;

@@ -4,5 +4,5 @@
 por Measured (`(separator.pressure - 760)/760*101.325`), não `separator.pressure` bruto: esse
 último é a grandeza interna do solver físico, em mmHg — mesma razão de sensors/reactor_pressure.rs.
 */
-#[monjolo::sensor(key = "xmeas.separator.pressure")]
+#[monjolo::sensor(key = "xmeas.separator.pressure", noise = 0.3)]
 pub struct SeparatorPressure;
