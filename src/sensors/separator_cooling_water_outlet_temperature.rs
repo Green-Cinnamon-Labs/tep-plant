@@ -1,5 +1,5 @@
 /* tep/sensors/separator_cooling_water_outlet_temperature.rs */
 
 /* XMEAS(22), Separator Cooling Water Outlet Temp (°C) — publicado por Measured. */
-#[monjolo::sensor(key = "xmeas.separator.cooling_water_outlet_temperature")]
+#[monjolo::sensor(key = "xmeas.separator.cooling_water_outlet_temperature", noise = 0.01)]
 pub struct SeparatorCoolingWaterOutletTemperature;

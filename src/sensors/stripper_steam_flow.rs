@@ -4,5 +4,5 @@
 deriva do calor do condensador (QUC), não de uma vazão mássica de vapor calculada à parte
 (teprob.f:980, `XMEAS(19) = QUC * 1.04D3 * 0.454`) — simplificação do modelo clássico, não bug.
 */
-#[monjolo::sensor(key = "xmeas.stripper.steam_flow_rate")]
+#[monjolo::sensor(key = "xmeas.stripper.steam_flow_rate", noise = 1.15)]
 pub struct StripperSteamFlow;

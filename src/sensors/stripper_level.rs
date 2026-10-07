@@ -4,5 +4,5 @@
 sensors/separator_level.rs: a malha opera sobre o valor já convertido pra % que `Measured` publica,
 não `stripper.liquid_volume` bruto.
 */
-#[monjolo::sensor(key = "xmeas.stripper.level")]
+#[monjolo::sensor(key = "xmeas.stripper.level", noise = 1.0)]
 pub struct StripperLevel;

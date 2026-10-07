@@ -5,5 +5,5 @@
 que um transmissor de verdade reportaria — consistente com o resto de sensors/, ver
 reactor_pressure.rs pra um caso onde a diferença numérica importa de verdade).
 */
-#[monjolo::sensor(key = "xmeas.reactor.temperature")]
+#[monjolo::sensor(key = "xmeas.reactor.temperature", noise = 0.01)]
 pub struct ReactorTemperature;
