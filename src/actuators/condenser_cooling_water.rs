@@ -1,8 +1,5 @@
-/* tep/actuators/condenser_cooling_water.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-11: Condenser Cooling Water Flow. VTAU(11) = 5s — igual à maioria das demais (não 120s, como
-docs/_deprecated_1.rs sugere).
-*/
 #[monjolo::actuator(key = "valve.condenser_cooling_water.position", config = "state.valves.condenser_cooling_water")]
 pub struct CondenserCoolingWater {
     #[command]

@@ -1,6 +1,5 @@
-/* tep/actuators/stripper_product.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-8: Stripper Liquid Product Flow. VTAU(8) = 5s. */
 #[monjolo::actuator(key = "valve.stripper_product.position", config = "state.valves.stripper_product")]
 pub struct StripperProduct {
     #[command]

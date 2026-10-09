@@ -1,6 +1,5 @@
-/* tep/actuators/feed_a.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-3: A Feed Flow. VTAU(3) = 6s. */
 #[monjolo::actuator(key = "valve.feed_a.position", config = "state.valves.a_feed")]
 pub struct FeedA {
     #[command]
