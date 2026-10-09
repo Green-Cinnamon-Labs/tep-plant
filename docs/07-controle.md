@@ -205,7 +205,13 @@ O mv calculado no passo k é aplicado no passo k+1. Isso é um atraso de um pass
 
 ## Ações de controle ativas
 
-A planta opera com três controladores proporcionais (P). Nenhum tem ação integral ou derivativa.
+A planta opera com três controladores PI (#89). Esta seção reúne também o que antes estava em comentários dentro de `src/controllers/` (o código ficou só com o código, no mesmo padrão de `docs/12-reator.md`); os testes ficam em `tests/controllers/`, um arquivo por malha.
+
+As malhas nasceram P, com Kc, setpoint e bias validados nos Exp 10, 11 e 13 (`experimentos.md`), mas só com P a planta aceitava offset permanente e não voltava de um IDV6 (Exp 25). A lei é `mv = clamp(bias + Kc × (e + I/τi), 0, 100)`, com `e = medida − setpoint` e `dI/dt = e`. Sem derivativo, que amplificaria o ruído dos sensores (#66).
+
+A integral `I` é um `#[state]` do controller, integrado pelo RK4 junto com o resto da planta, e não um acumulador mutado dentro de `control()`: o RK4 chama `control()` várias vezes por tick, em sub-passos hipotéticos, então `control()` só devolve `dI/dt` e quem soma é o Integrator. Por isso o τi está em horas: o Integrator integra com `dt_hours`. `I` nasce em 0, então em t = 0 a saída é a lei P antiga, sem solavanco. Anti-windup por integração condicional: com a válvula saturada e o erro empurrando para fora da faixa, `dI/dt = 0`.
+
+Os τi são os das mesmas malhas na estrutura descentralizada de Ricker (1996), também usada por Larsson & Skogestad (2001). Lá o Kc tem outra unidade (a saída é uma razão em cascata com uma malha de vazão), então só o τi é reaproveitado e os Kc continuam os do controlador P.
 
 ### Malha 1 — Pressão do Reator → Purge Valve
 
@@ -214,15 +220,19 @@ A planta opera com três controladores proporcionais (P). Nenhum tem ação inte
 | Medição   | XMEAS(7) — Reactor Pressure [kPa] — `xmeas[6]` |
 | Atuador   | XMV(6) — Purge Valve [%] — `xmv[5]`            |
 | Setpoint  | 2705.0 kPa                                     |
-| Kp        | 0.1                                            |
+| Kc        | 0.1                                            |
+| τi        | 20 min (1/3 h)                                 |
 | Bias      | 40.06%                                         |
-| Fórmula   | `mv = clamp(40.06 + 0.1 × (P − 2705), 0, 100)` |
+| Fórmula   | `mv = clamp(40.06 + 0.1 × (e + I/τi), 0, 100)`, `e = P − 2705` |
+| Integral  | `controller.reactor_pressure.integral`         |
 
 **O que faz:** se a pressão sobe, abre a purge para ventilar gás. Se cai, fecha a purge para reter gás.
 
-**Ganho na prática:** com Kp=0.1, a purge atinge 100% quando a pressão chega a 2705 + (100−40.06)/0.1 = **3305 kPa** — acima do ISD de 3000 kPa. Isso significa que o controlador nunca satura antes do shutdown. Por outro lado, a resposta é lenta: um aumento de 50 kPa move a purge apenas 5 pontos percentuais.
+**Por que existe:** sem essa malha a pressão do reator deriva sem limite (Exp 8: desbalanço de massa gasosa global, ~0.15%/h), porque a purge é a única saída de gás da planta e nada mais a regula.
 
-**Offset permanente:** como é controle P puro, a pressão estabiliza em ~2700.5 kPa, não exatamente no setpoint. O offset de ~4.5 kPa é tolerável em regime nominal.
+**Ganho na prática (parte proporcional):** com Kc=0.1, a purge atinge 100% quando a pressão chega a 2705 + (100−40.06)/0.1 = **3305 kPa** — acima do ISD de 3000 kPa. Isso significa que o controlador nunca satura antes do shutdown. Por outro lado, a resposta é lenta: um aumento de 50 kPa move a purge apenas 5 pontos percentuais.
+
+**Offset:** com controle P puro a pressão estabilizava fora do setpoint (~4.5 kPa em regime nominal, 130 kPa sob IDV6 no Exp 25). A integral leva a pressão de volta a 2705 kPa.
 
 ### Malha 2 — Nível do Separador → Underflow do Separador
 
@@ -231,13 +241,19 @@ A planta opera com três controladores proporcionais (P). Nenhum tem ação inte
 | Medição   | XMEAS(12) — Separator Level [%] — `xmeas[11]` |
 | Atuador   | XMV(7) — Separator Underflow [%] — `xmv[6]`   |
 | Setpoint  | 50.0%                                         |
-| Kp        | 1.0                                           |
+| Kc        | 1.0                                           |
+| τi        | 200 min (10/3 h)                              |
 | Bias      | 38.1%                                         |
-| Fórmula   | `mv = clamp(38.1 + 1.0 × (L − 50), 0, 100)`   |
+| Fórmula   | `mv = clamp(38.1 + 1.0 × (e + I/τi), 0, 100)`, `e = L − 50` |
+| Integral  | `controller.separator_level.integral`         |
 
 **O que faz:** se o nível do separador sobe, abre o underflow para drenar líquido para o stripper. Se cai, fecha para reter líquido.
 
-**Ganho na prática:** Kp=1.0 significa que cada 1% de desvio no nível produz 1% de mudança na válvula. Atinge 100% em L=111.9% (impossível, pois ISD dispara em 90%) e 0% em L=11.9%.
+**Por que existe:** sem essa malha o separador acumula ou esvazia líquido sem controle: nada mais no sistema regula o inventário do vaso.
+
+**Ganho na prática (parte proporcional):** Kc=1.0 significa que cada 1% de desvio no nível produz 1% de mudança na válvula. Atinge 100% em L=111.9% (impossível, pois ISD dispara em 90%) e 0% em L=11.9%.
+
+**Offset e τi:** só com P o nível aceitava offset permanente (3.5% sob IDV6, Exp 25). O τi de 200 min é lento de propósito: o vaso amortece as variações de vazão e a integral tira o offset ao longo de horas.
 
 ### Malha 3 — Nível do Stripper → Produto do Stripper
 
@@ -246,13 +262,19 @@ A planta opera com três controladores proporcionais (P). Nenhum tem ação inte
 | Medição   | XMEAS(15) — Stripper Level [%] — `xmeas[14]` |
 | Atuador   | XMV(8) — Stripper Product [%] — `xmv[7]`     |
 | Setpoint  | 50.0%                                        |
-| Kp        | 1.0                                          |
+| Kc        | 1.0                                          |
+| τi        | 200 min (10/3 h)                             |
 | Bias      | 46.5%                                        |
-| Fórmula   | `mv = clamp(46.5 + 1.0 × (L − 50), 0, 100)`  |
+| Fórmula   | `mv = clamp(46.5 + 1.0 × (e + I/τi), 0, 100)`, `e = L − 50` |
+| Integral  | `controller.stripper_level.integral`         |
 
 **O que faz:** se o nível do stripper sobe, abre a válvula de produto para retirar líquido. Se cai, fecha para reter.
 
-**Ganho na prática:** mesma sensibilidade da malha 2. Atinge 100% em L=103.5% e 0% em L=3.5%.
+**Por que existe:** pelo mesmo motivo da malha 2: sem ela o stripper acumula ou esvazia líquido sem controle.
+
+**Ganho na prática (parte proporcional):** mesma sensibilidade da malha 2. Atinge 100% em L=103.5% e 0% em L=3.5%.
+
+**Offset e τi:** só com P o nível aceitava offset permanente (5.1% sob IDV6, Exp 25); a integral o tira, com o mesmo τi lento da malha 2.
 
 ---
 

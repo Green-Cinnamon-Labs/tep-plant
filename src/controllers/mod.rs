@@ -6,12 +6,15 @@ nenhum `build_tep()` (nem `main()`) precisa conhecer o tipo. Cada um declara cam
 "...")]`/`#[actuator(key = "...")]` e escreve seu próprio `control(&self)` (chamado por
 `evaluate()`, gerado pela macro) — mesmo padrão de `#[actuator(...)]`/`dynamics()`.
 
-Os 3 controladores P clássicos do TEP (Downs & Vogel 1993; `experimentos.md`, Exp 10/11/13),
-validados como necessários e suficientes pra manter a planta estável — sem eles, o desbalanço de
-massa gasosa e o inventário de líquido dos vasos derivam sem limite (Exp 8/9):
+Os 3 controladores do TEP (Downs & Vogel 1993; `experimentos.md`, Exp 10/11/13), validados como
+necessários e suficientes pra manter a planta estável — sem eles, o desbalanço de massa gasosa e o
+inventário de líquido dos vasos derivam sem limite (Exp 8/9):
 - pressão do reator → purge
 - nível do separador → separator underflow
 - nível do stripper → stripper product
+
+Nasceram P e viraram PI (#89): só com P a planta aceitava offset permanente e não voltava de um
+IDV6 (Exp 25). A integral é um `#[state]` do controller, integrado pelo RK4; τi de Ricker (1996).
 
 Uma 4ª malha (nível do reator → A feed) foi tentada e **refutada** no Exp 9 — piorou o desbalanço
 em vez de corrigi-lo — de propósito NÃO está implementada aqui.

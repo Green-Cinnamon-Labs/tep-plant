@@ -1,6 +1,5 @@
-/* tep/actuators/feed_ac.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-4: A&C Feed Flow (alimentação combinada). VTAU(4) = 9s. */
 #[monjolo::actuator(key = "valve.feed_ac.position", config = "state.valves.a_c_feed")]
 pub struct FeedAc {
     #[command]

@@ -1,6 +1,5 @@
-/* tep/actuators/agitator.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-12: Agitator Speed. VTAU(12) = 5s. Único na planta, sem chave por nome. */
 #[monjolo::actuator(key = "agitator.speed", config = "state.valves.agitator_speed")]
 pub struct Agitator {
     #[command]

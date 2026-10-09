@@ -1,6 +1,5 @@
-/* tep/actuators/purge.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-6: Purge Valve. VTAU(6) = 5s. */
 #[monjolo::actuator(key = "valve.purge.position", config = "state.valves.purge_valve")]
 pub struct Purge {
     #[command]

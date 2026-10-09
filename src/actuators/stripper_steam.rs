@@ -1,8 +1,5 @@
-/* tep/actuators/stripper_steam.rs */
+/* Documentação: docs/19-atuadores.md */
 
-/* XMV-9: Stripper Steam Valve. VTAU(9) = 120s — a mais lenta das 12 (não a de resfriamento do
-condensador, como docs/_deprecated_1.rs sugere).
-*/
 #[monjolo::actuator(key = "valve.stripper_steam.position", config = "state.valves.stripper_steam_valve")]
 pub struct StripperSteam {
     #[command]
