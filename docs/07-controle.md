@@ -205,6 +205,8 @@ O mv calculado no passo k é aplicado no passo k+1. Isso é um atraso de um pass
 
 ## Ações de controle ativas
 
+> **Atenção (Experimento 27, 2026-10-11):** com estas três malhas PI e sem malha de nível do reator, a planta não assenta. Em operação nominal, sem distúrbio, a integral da pressão fecha a purga aos poucos, o nível do reator cai e, em ≈ 33 h simuladas, a planta se perde (o feixe de resfriamento fica descoberto abaixo de 45.8 % de nível). Com as malhas P a mesma planta converge em 40 h. A decisão entre criar a malha de nível do reator ou voltar a pressão para P está na #89; ver `experimentos.md` no repositório de especificação.
+
 A planta opera com três controladores PI (#89). Esta seção reúne também o que antes estava em comentários dentro de `src/controllers/` (o código ficou só com o código, no mesmo padrão de `docs/12-reator.md`); os testes ficam em `tests/controllers/`, um arquivo por malha.
 
 As malhas nasceram P, com Kc, setpoint e bias validados nos Exp 10, 11 e 13 (`experimentos.md`), mas só com P a planta aceitava offset permanente e não voltava de um IDV6 (Exp 25). A lei é `mv = clamp(bias + Kc × (e + I/τi), 0, 100)`, com `e = medida − setpoint` e `dI/dt = e`. Sem derivativo, que amplificaria o ruído dos sensores (#66).
