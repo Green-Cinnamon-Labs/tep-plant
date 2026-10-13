@@ -32,15 +32,25 @@ A velocidade de cada reação, por unidade de volume, é a forma de Arrhenius do
 
 **`flow_to_separator` (bloco 2, ex-Flows, slot 7).** A vazão para o separador depende da diferença de pressão entre reator e separador, sem válvula. O fator `(1 − 0,25·0)` é o canal de distúrbio 11, deixado neutro.
 
-**`heat_exchange` (bloco 3, ex-Heat, bloco 32).** A troca térmica entre o reator e a água de resfriamento. O UARLEV é a fração da serpentina submersa: zero abaixo de nível 10 (seca, sem troca), rampa linear até nível 50 e platô em 1,0 dali para cima (totalmente submersa, mais líquido não aumenta mais nada). O nível vem do volume de líquido dividido por 7,8, um fator de conversão deste bloco. O fator `(1 − 0,35·0)` é o canal de distúrbio 9 (IDV 17), deixado neutro. A temperatura de retorno da água é a constante congelada `REACTOR_COOLING_WATER_RETURN`.
+**`heat_exchange` (bloco 3, ex-Heat, bloco 32).** A troca térmica entre o reator e a água de resfriamento. O UARLEV é a fração da serpentina submersa: zero abaixo de nível 10 (seca, sem troca), rampa linear até nível 50 e platô em 1,0 dali para cima (totalmente submersa, mais líquido não aumenta mais nada). O nível vem do volume de líquido dividido por 7,8, um fator de conversão deste bloco. O fator `(1 − 0,35·0)` é o canal de distúrbio 9 (IDV 17), deixado neutro. A temperatura de retorno da água (`twr`) é um estado do reator, integrado por `cooling_water_balance`.
+
+**`cooling_water_balance` (`YP(37)` do `teprob.f`).** O balanço de energia da água de resfriamento: a água entra a 35 °C (`REACTOR_COOLING_WATER_INLET`), com vazão proporcional à abertura da válvula `valve.reactor_cooling_water.position` (XMV 10, faixa `REACTOR_COOLING_WATER_RANGE` = 1000), e recebe o calor que o reator perde. A derivada é `(vazão · 500,53 · (35 − twr) − calor · 10⁶/1,8) / REACTOR_COOLING_WATER_HOLDUP`, com `REACTOR_COOLING_WATER_HOLDUP` = 7060 (`HWR`).
 
 **`mass_and_energy_balance` (bloco 4, ex-Derivatives, bloco 40 YP(1..9)).** O balanço de massa e energia do próprio estado: entrada do compressor menos saída para o separador mais a reação, por componente, e o mesmo para a entalpia com o calor de reação e o calor trocado. As entalpias são recomputadas frescas a partir de composição e temperatura, mesmo padrão das outras unidades.
 
 **`xmeas_readings` (bloco 5, ex-measured.rs, bloco 35).** As medidas XMEAS 7 a 9 (pressão, nível e temperatura do reator) e a 21 (temperatura de saída da água de resfriamento), com as conversões preservadas do original: (P − 760)/760 · 101,325 (mmHg manométrico para kPa manométrico) e volume/666,7 · 100 (calibração do instrumento de nível).
 
-## A temperatura de saída da água de resfriamento (TWR) é uma constante congelada
+## A temperatura de saída da água de resfriamento (TWR) é um estado
 
-`REACTOR_COOLING_WATER_RETURN` (94,59927549) é fiel ao FORTRAN original: em `TEFUNC`, `YP(37)` nunca é atribuído e o TWR fica constante no valor de inicialização, que é também o `[state.cooling].reactor_water_temp` de `application.toml`. É o mesmo padrão de `Separator::heat_exchange` (`SEPARATOR_COOLING_WATER_RETURN`).
+Desde a spec-tennessee-eastman#90, na linha de trabalho da #91, o `twr` é um estado integrado, como no `teprob.f` intacto (`YP(37)`, linhas 789–790 de `docs/fortran-original/teprob.f`). O valor inicial é o `[state.cooling].reactor_water_temp` de `application.toml` (94,59927549). Com isso a válvula XMV 10 volta a agir sobre a temperatura do reator.
+
+Nas versões publicadas da planta (até `v2.1.0-alpha`) o `twr` é uma constante congelada nesse mesmo valor. O texto abaixo conta como se chegou a essa constante e fica como histórico.
+
+**Correção (2026-10-13):** o histórico afirma que o TWR congelado é fiel ao FORTRAN porque `YP(37)` nunca é atribuído. Isso vale só para a cópia reescrita que o repositório tinha (`docs/fortran-original/teprob_anotado_truncado.f`), em que o bloco das derivadas termina em `YP(36)`. No arquivo intacto `YP(37)` e `YP(38)` existem.
+
+### Histórico: quando o TWR era uma constante
+
+`REACTOR_COOLING_WATER_RETURN` (94,59927549) foi tratado como fiel ao FORTRAN original: na cópia truncada, em `TEFUNC`, `YP(37)` nunca é atribuído e o TWR fica constante no valor de inicialização, que é também o `[state.cooling].reactor_water_temp` de `application.toml`. Era o mesmo padrão de `Separator::heat_exchange` (`SEPARATOR_COOLING_WATER_RETURN`).
 
 Existiu aqui uma fórmula quase-estática (o `twr` como média ponderada de `uar`, `tcr` e a água de entrada, a partir da abertura da válvula `valve.reactor_cooling_water.position`, XMV 10) que foi removida em 2026-09-16, no Exp 24. Não foi uma regressão: foi a correção de um erro estrutural descoberto ao investigar por que a `v1.0.0`, usada como "ground truth" nos Exp 18–23, tinha essa fórmula ativa. A arqueologia, via `git log --follow` em `tennessee-eastman-service/core/src/dynamics/tep/model.rs`, foi esta:
 

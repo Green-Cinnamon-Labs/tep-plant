@@ -85,16 +85,16 @@ fn physical_state_matches_nominal_operating_point_from_application_toml() {
     );
 }
 
-/* Regressão direta do bug do Exp 18: `heat_exchange` sempre publica
-`SEPARATOR_COOLING_WATER_RETURN` como temperatura de retorno (é uma constante congelada, não
-calculada) — este teste existe só pra travar o valor certo (77.29698353, `[state.cooling].
-separator_water_temp` de `application.toml`) contra uma futura regressão de volta pro 40.0
-errado (`s_zero` do canal de distúrbio 5, TCWS — entrada, não retorno).
+/* Regressão do bug do Exp 18: `heat_exchange` publica como temperatura de retorno o ESTADO
+`tws` (semeado de `[state.cooling].separator_water_temp`), nunca a temperatura de entrada da
+água (40.0, `SEPARATOR_COOLING_WATER_INLET`). Desde a spec-tennessee-eastman#90 `tws` é um estado
+integrado, não mais uma constante.
 */
 #[test]
-fn heat_exchange_returns_the_corrected_frozen_return_temperature() {
+fn heat_exchange_publishes_the_cooling_water_state_as_return_temperature() {
     let harness = Harness::new();
-    let _separator = harness.unit(|registry| Separator::new(registry, &Snapshot::from_pairs(&[])));
+    let initial = Snapshot::from_pairs(&[("state.cooling.separator_water_temp", 77.29698353)]);
+    let _separator = harness.unit(|registry| Separator::new(registry, &initial));
     harness.seed("reactor.temperature", 120.0);
     harness.seed("flows.stream_flow.7", 4000.0);
     let task = harness.task("Separator::heat_exchange");
@@ -106,6 +106,36 @@ fn heat_exchange_returns_the_corrected_frozen_return_temperature() {
         77.29698353,
         "regressão pro bug do Exp 18 — TCWS de entrada no lugar do tws de retorno"
     );
+}
+
+/* Roda só `cooling_water_balance`, com as três entradas semeadas por chave. */
+fn cooling_water_derivative(valve_position: f64, return_temperature: f64, separator_heat: f64) -> f64 {
+    let harness = Harness::new();
+    let _separator = harness.unit(|registry| Separator::new(registry, &Snapshot::from_pairs(&[])));
+    harness.seed("valve.condenser_cooling_water.position", valve_position);
+    harness.seed("heat.separator_cooling_water_return", return_temperature);
+    harness.seed("heat.separator_heat", separator_heat);
+    let task = harness.task("Separator::cooling_water_balance");
+    harness.resolve();
+    task.evaluate();
+    harness.read("separator.state.cooling_water_temperature.derivative")
+}
+
+/* `YP(38)` do `teprob.f` intacto: `(FWS*500.53*(TCWS-TWS) - QUS*1.D6/1.8)/HWS`, com
+`FWS = VPOS(11)*1200/100`, `TCWS = 40` e `HWS = 11138`. Conta à mão pra válvula em 18 %, água
+saindo a 77.3 °C e `QUS = -7.3`: `(216*500.53*(-37.3) + 7.3e6/1.8)/11138`.
+*/
+#[test]
+fn cooling_water_balance_matches_the_fortran_equation() {
+    let derivative = cooling_water_derivative(18.0, 77.3, -7.3);
+    assert!((derivative - 2.054718221903048).abs() < 1e-9, "obteve {derivative}");
+}
+
+#[test]
+fn cooling_water_balance_cools_with_more_water_and_warms_with_more_heat() {
+    let base = cooling_water_derivative(18.0, 77.3, -7.3);
+    assert!(cooling_water_derivative(25.0, 77.3, -7.3) < base, "mais vazão de água deveria esfriar a água");
+    assert!(cooling_water_derivative(18.0, 77.3, -9.0) > base, "mais calor retirado deveria aquecer a água");
 }
 
 /* Semeia todas as entradas de `mass_and_energy_balance` com fluxos BALANCEADOS: o vapor do

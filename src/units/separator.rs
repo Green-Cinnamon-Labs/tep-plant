@@ -5,7 +5,9 @@ use monjolo::chemistry::{liquid_density, temperature_from_enthalpy, Mixture};
 
 const SEPARATOR_VOLUME: f64 = 3500.0;
 const SEPARATOR_UNDERFLOW_RANGE: f64 = 1500.0;
-const SEPARATOR_COOLING_WATER_RETURN: f64 = 77.29698353;
+const SEPARATOR_COOLING_WATER_RANGE: f64 = 1200.0;
+const SEPARATOR_COOLING_WATER_INLET: f64 = 40.0;
+const SEPARATOR_COOLING_WATER_HOLDUP: f64 = 11138.0;
 
 #[monjolo::dynamic_model(tasks)]
 pub struct Separator {
@@ -23,6 +25,11 @@ pub struct Separator {
     #[config(key = "state.separator.energy")]
     #[offer(key = "separator.state.enthalpy")]
     enthalpy: f64,
+
+    #[state]
+    #[config(key = "state.cooling.separator_water_temp")]
+    #[offer(key = "separator.state.cooling_water_temperature")]
+    cooling_water_temperature: f64,
 
     constants: TepConstants,
 }
@@ -65,8 +72,19 @@ impl Separator {
     #[task]
     fn heat_exchange(&self) {
         let uas = 0.404655 * (1.0 - 1.0 / (1.0 + (need::flows__stream_flow__7 / 3528.73).powi(4)));
-        offer::heat__separator_heat = uas * (SEPARATOR_COOLING_WATER_RETURN - need::reactor__temperature) * (1.0 - 0.25 * 0.0);
-        offer::heat__separator_cooling_water_return = SEPARATOR_COOLING_WATER_RETURN;
+        let tws = self.cooling_water_temperature();
+
+        offer::heat__separator_heat = uas * (tws - need::reactor__temperature) * (1.0 - 0.25 * 0.0);
+        offer::heat__separator_cooling_water_return = tws;
+    }
+
+    #[task]
+    fn cooling_water_balance(&self) {
+        let cooling_water_flow = need::valve__condenser_cooling_water__position * SEPARATOR_COOLING_WATER_RANGE / 100.0;
+        let tws = need::heat__separator_cooling_water_return;
+
+        offer::separator__state__cooling_water_temperature__derivative =
+            (cooling_water_flow * 500.53 * (SEPARATOR_COOLING_WATER_INLET - tws) - need::heat__separator_heat * 1.0e6 / 1.8) / SEPARATOR_COOLING_WATER_HOLDUP;
     }
 
     #[task]

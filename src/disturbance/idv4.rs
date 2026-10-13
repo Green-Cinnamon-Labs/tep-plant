@@ -5,6 +5,10 @@ Vogel 1993). A água de resfriamento do reator entra 5°C mais quente, reduzindo
 remoção de calor. Tende a elevar a temperatura do reator e deslocar o equilíbrio vapor-líquido.
 **Foi o distúrbio usado nos Exps 2 e 3 deste projeto (inadvertidamente ativo).**
 
+ATUALIZAÇÃO (2026-10-13, spec-tennessee-eastman#90): `twr` voltou a ser um estado integrado
+(`units/reactor.rs`, `cooling_water_balance`), como no `teprob.f` intacto. O ponto de entrada deste
+IDV passa a ser `REACTOR_COOLING_WATER_INLET`. O texto abaixo descreve a planta com `twr` congelado.
+
 CASCA — ainda não implementado, E sem efeito possível hoje mesmo se implementado: IDV(4) perturba
 `tcwr` (temperatura de ENTRADA da água de resfriamento do reator) — mas desde o Exp 24
 (`experimentos.md`), `twr` (temperatura de RETORNO, `units/reactor.rs`,

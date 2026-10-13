@@ -8,7 +8,9 @@ const REACTOR_VOLUME: f64 = 1300.0;
 const REACTION_FACTOR_1_NOMINAL: f64 = 1.0;
 const REACTION_FACTOR_2_NOMINAL: f64 = 1.0;
 const TEMPERATURE_SEED: f64 = 120.0;
-const REACTOR_COOLING_WATER_RETURN: f64 = 94.59927549;
+const REACTOR_COOLING_WATER_RANGE: f64 = 1000.0;
+const REACTOR_COOLING_WATER_INLET: f64 = 35.0;
+const REACTOR_COOLING_WATER_HOLDUP: f64 = 7060.0;
 
 static REACTIONS: LazyLock<Reactions<8>> = LazyLock::new(|| {
     Reactions::new(&TEP_SPECIES)
@@ -62,6 +64,11 @@ pub struct Reactor {
     #[offer(key = "reactor.state.enthalpy")]
     enthalpy: f64,
 
+    #[state]
+    #[config(key = "state.cooling.reactor_water_temp")]
+    #[offer(key = "reactor.state.cooling_water_temperature")]
+    cooling_water_temperature: f64,
+
     constants: TepConstants,
 }
 
@@ -113,10 +120,19 @@ impl Reactor {
             0.025 * level - 0.25
         };
         let uar = uar_level * (-0.5 * agitation_factor * agitation_factor + 2.75 * agitation_factor - 2.5) * 855490e-6;
-        let twr = REACTOR_COOLING_WATER_RETURN;
+        let twr = self.cooling_water_temperature();
 
         offer::heat__reactor_heat = uar * (twr - need::reactor__temperature) * (1.0 - 0.35 * 0.0);
         offer::heat__reactor_cooling_water_return = twr;
+    }
+
+    #[task]
+    fn cooling_water_balance(&self) {
+        let cooling_water_flow = need::valve__reactor_cooling_water__position * REACTOR_COOLING_WATER_RANGE / 100.0;
+        let twr = need::heat__reactor_cooling_water_return;
+
+        offer::reactor__state__cooling_water_temperature__derivative =
+            (cooling_water_flow * 500.53 * (REACTOR_COOLING_WATER_INLET - twr) - need::heat__reactor_heat * 1.0e6 / 1.8) / REACTOR_COOLING_WATER_HOLDUP;
     }
 
     #[task]

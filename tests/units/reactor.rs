@@ -200,11 +200,10 @@ certo tem que produzir a medida certa em QUALQUER ponto da trajetória, não só
 isola `Reactor` por completo do resto da planta, então qualquer divergência encontrada aqui é,
 por eliminação, um bug de fórmula dentro do próprio `Reactor`, não de acoplamento.
 
-Desde o Exp 24, `twr` é uma constante congelada (`REACTOR_COOLING_WATER_RETURN`) — a
-comparação contra `XMEAS(21)` continua valiosa (confirma que a constante escolhida bate com o
-que o baseline validado realmente mediu), só que agora o limiar pode ser bem mais apertado, já
-que não sobra nenhuma dependência de `tcr`/nível/agitação pra propagar erro nenhum: a única
-fonte de diferença é o ruído de medição do próprio CSV.
+O CSV foi gravado com `twr` congelado em 94.59927549 (Exp 24). Desde a
+spec-tennessee-eastman#90 `twr` é um estado integrado; aqui ele é semeado com esse mesmo valor,
+então a comparação contra `XMEAS(21)` só confirma que o estado chega intacto em
+`heat.reactor_cooling_water_return`. A única fonte de diferença é o ruído de medição do CSV.
 */
 #[test]
 fn physical_state_and_heat_exchange_match_the_validated_csv_at_many_points_along_the_real_trajectory() {
@@ -232,6 +231,7 @@ fn physical_state_and_heat_exchange_match_the_validated_csv_at_many_points_along
             ("state.reactor_vapor.G", yy[6]),
             ("state.reactor_vapor.H", yy[7]),
             ("state.reactor.energy", yy[8]),
+            ("state.cooling.reactor_water_temp", 94.59927549),
         ]);
 
         let harness = Harness::new();
@@ -269,14 +269,60 @@ fn physical_state_and_heat_exchange_match_the_validated_csv_at_many_points_along
         "\nmax |\u{394}| em 200 ticks: temperatura={max_temperature_diff:.6}\u{b0}C pressao={max_pressure_diff:.6}kPa twr={max_twr_diff:.6}\u{b0}C"
     );
 
-    /* Limiares: XMEAS(9) σ=0.01, XMEAS(7) σ=0.3, XMEAS(21) σ=0.01 (Block 37/XNS de `v1.0.0`).
-    `twr` agora é uma constante pura, então seu limiar pode ser bem mais apertado que antes do
-    Exp 24 (era 0.5, folgado pra absorver o viés de fórmula que já não existe mais).
-    */
+    /* Limiares: XMEAS(9) σ=0.01, XMEAS(7) σ=0.3, XMEAS(21) σ=0.01 (Block 37/XNS de `v1.0.0`). */
     assert!(
         max_temperature_diff < 0.05 && max_pressure_diff < 1.0 && max_twr_diff < 0.1,
         "physical_state()/heat_exchange() nao reproduzem a trajetoria validada dado o MESMO \
         estado de entrada - a formula diverge da fisica correta mesmo fora do ponto nominal \
         (max dT={max_temperature_diff}, max dP={max_pressure_diff}, max dtwr={max_twr_diff})"
     );
+}
+
+/* Roda só `cooling_water_balance`, com as três entradas semeadas por chave. */
+fn cooling_water_derivative(valve_position: f64, return_temperature: f64, reactor_heat: f64) -> f64 {
+    let harness = Harness::new();
+    let _reactor = harness.unit(|registry| Reactor::new(registry, &Snapshot::from_pairs(&[])));
+    harness.seed("valve.reactor_cooling_water.position", valve_position);
+    harness.seed("heat.reactor_cooling_water_return", return_temperature);
+    harness.seed("heat.reactor_heat", reactor_heat);
+    let task = harness.task("Reactor::cooling_water_balance");
+    harness.resolve();
+    task.evaluate();
+    harness.read("reactor.state.cooling_water_temperature.derivative")
+}
+
+/* `YP(37)` do `teprob.f` intacto: `(FWR*500.53*(TCWR-TWR) - QUR*1.D6/1.8)/HWR`, com
+`FWR = VPOS(10)*1000/100`, `TCWR = 35` e `HWR = 7060`. Conta à mão pra válvula em 41 %, água
+saindo a 94.6 °C e `QUR = -22.0`: `(410*500.53*(-59.6) + 22.0e6/1.8)/7060`.
+*/
+#[test]
+fn cooling_water_balance_matches_the_fortran_equation() {
+    let derivative = cooling_water_derivative(41.0, 94.6, -22.0);
+    assert!((derivative - (-1.2363821214980448)).abs() < 1e-9, "obteve {derivative}");
+}
+
+#[test]
+fn cooling_water_balance_cools_with_more_water_and_warms_with_more_heat() {
+    let base = cooling_water_derivative(41.0, 94.6, -22.0);
+    assert!(cooling_water_derivative(60.0, 94.6, -22.0) < base, "mais vazão de água deveria esfriar a água");
+    assert!(cooling_water_derivative(41.0, 94.6, -25.0) > base, "mais calor retirado deveria aquecer a água");
+}
+
+#[test]
+fn heat_exchange_uses_the_cooling_water_state_as_return_temperature() {
+    let harness = Harness::new();
+    let initial = Snapshot::from_pairs(&[("state.cooling.reactor_water_temp", 94.59927549)]);
+    let reactor = harness.unit(|registry| Reactor::new(registry, &initial));
+    harness.seed("agitator.speed", 50.0);
+    harness.seed("reactor.liquid_volume", 500.0);
+    harness.seed("reactor.temperature", 120.0);
+    let task = harness.task("Reactor::heat_exchange");
+    harness.resolve();
+    task.evaluate();
+
+    assert_eq!(reactor.cooling_water_temperature(), 94.59927549);
+    assert_eq!(harness.read("heat.reactor_cooling_water_return"), 94.59927549);
+    /* agitação 50 % → fator 1.0; nível acima do corte → `uar = 855490e-6`. */
+    let expected_heat = 855490e-6 * (94.59927549 - 120.0);
+    assert!((harness.read("heat.reactor_heat") - expected_heat).abs() < 1e-12);
 }
