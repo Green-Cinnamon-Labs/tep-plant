@@ -26,6 +26,50 @@ let result = function.evaluate(
 - **Os controladores e os sensores ficam de fora.** Quem chama escreve direto as 12 posições de válvula. As medições são lidas das chaves `xmeas.*`, que não têm ruído; o ruído só existe dentro dos sensores.
 - **A derivada de uma válvula não tem uso aqui.** Ela mede a distância até o comando guardado no atuador, que nesse modo fica parado no valor do TOML. Em regime, posição e comando são iguais.
 
+## Pelo HTTP
+
+O mesmo `ModelFunction` pode ser servido por HTTP, para um cliente de fora do processo. O binário precisa da feature `function`, e o modo é escolhido na partida:
+
+```bash
+cargo build --features function --bin tep-plant
+MONJOLO_MODE=function ./target/debug/tep-plant
+```
+
+No PowerShell: `$env:MONJOLO_MODE = "function"; .\target\debug\tep-plant.exe`.
+
+- **Modo:** `[monjolo] mode = "function"` no `application.toml`, ou a variável `MONJOLO_MODE`, que tem precedência. Sem nenhum dos dois o binário sobe a simulação, como sempre.
+- **Endereço:** `[monjolo.function] endpoint` no `application.toml`, ou a variável `MONJOLO_FUNCTION_ENDPOINT`. O padrão é `127.0.0.1:8091`, que só a própria máquina alcança.
+- **O que não sobe:** a thread da planta e o OPC-UA. Nada é integrado no tempo.
+- **Ponto base:** o conteúdo do `application.toml`. Para avaliar em outro ponto, o cliente escreve os estados na chamada.
+
+| Rota | Faz |
+|---|---|
+| `GET /healthz` | Diz se o serviço está no ar e quantas chaves e estados o modelo tem |
+| `GET /keys` | Lista todas as chaves, com o valor no ponto base e a marca de quais são estados |
+| `POST /evaluate` | Avalia uma lista de pontos e devolve as chaves pedidas |
+
+```bash
+curl -s localhost:8091/healthz
+curl -s localhost:8091/evaluate -H 'content-type: application/json' \
+  -d '{"read": ["xmeas.stream9.flow_rate", "separator.state.vapor_a.derivative"],
+       "points": [{}, {"valve.purge.position": 30.0}]}'
+```
+
+```json
+{"read": ["xmeas.stream9.flow_rate", "separator.state.vapor_a.derivative"],
+ "values": [[0.3279606148796413, -0.20199944795655966],
+            [0.25182608242297444, 2.260312690706085]]}
+```
+
+A resposta tem uma linha por ponto, na ordem de `read`. Um ponto vazio (`{}`) é o próprio ponto base. No exemplo, fechar a purga de 39 % para 30 % reduz a vazão de purga e faz o vapor de A se acumular no separador.
+
+Uma válvula muda vazões e derivadas na mesma avaliação, mas não muda pressão nem temperatura: essas dependem só dos estados dos vasos.
+
+- **Os números fazem a ida e a volta sem perder precisão.** O valor que o cliente manda vira exatamente o mesmo número de ponto flutuante do lado do servidor, e o que volta é exatamente o que foi calculado.
+- **Valor não finito sai como `null`**, porque JSON não tem NaN nem infinito.
+- **Erro de quem chama é 400**, com a chave ou o campo do problema na mensagem. Se a avaliação do modelo falhar num ponto, a resposta é 500.
+- **Uma requisição por vez.** O servidor é de uma thread só; uma avaliação leva microssegundos.
+
 ## Os 50 estados
 
 São os mesmos de Downs & Vogel: 9 de cada vaso (reator, separador, stripper e compressor), as 2 temperaturas da água de resfriamento e as 12 válvulas. As temperaturas da água voltaram a ser estados na spec-tennessee-eastman#90; ver [12-reator.md](12-reator.md) e [13-separador.md](13-separador.md).
@@ -87,3 +131,7 @@ Dois testes, comparando todas as 253 chaves bit a bit:
 - **Instância reaproveitada contra instância nova:** doze pontos variados avaliados em sequência numa mesma instância dão, cada um, exatamente o que uma instância recém-criada dá.
 
 Além disso, a montagem do `ModelFunction` recusa um modelo em que avaliar duas vezes seguidas o mesmo ponto muda algum valor.
+
+### Pelo HTTP dá o mesmo
+
+Com o binário no modo função e os 50 estados do caso base escritos pelo cliente, a resposta traz os mesmos números: maior derivada física de 9,3e-4 (vapor C do reator), pressão do reator de 2705,000 kPa e custo de 170,626 $/h. O teste A, B, A foi repetido pelo HTTP, numa mesma chamada e em chamadas separadas, com resultado idêntico nas 253 chaves.

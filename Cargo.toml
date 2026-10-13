@@ -41,3 +41,7 @@ monjolo = { path = "../monjolo", features = ["chemistry"] }
 # Espelha a feature `opcua` de monjolo — mesma filosofia (async-opcua + tokio pesados demais pra
 # serem dependência default). `cargo run --bin tep-plant --features opcua` liga o adaptador.
 opcua = ["monjolo/opcua"]
+# Espelha a feature `function` de monjolo — o binário passa a poder subir no modo função
+# (`[monjolo] mode = "function"` ou `MONJOLO_MODE=function`), servindo a planta por HTTP em vez de
+# integrá-la no tempo. Ver docs/21-modo-funcao.md.
+function = ["monjolo/function"]
