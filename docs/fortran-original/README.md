@@ -1,3 +1,5 @@
+> **Note (tep-plant, 2026-10-13):** `teprob.f` in this folder is the unmodified file from the upstream repository. `teprob_anotado_truncado.f` is this project's earlier rewritten copy (Portuguese comments, numbered sections). It is missing the cooling-water equations `YP(37)` and `YP(38)` and the valve loop `YP(I+38)`, so it must not be used as a reference for what the original code does. See spec-tennessee-eastman#90.
+
 # Table of Contents
 
 1. [Author](#author)

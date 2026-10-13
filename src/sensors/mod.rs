@@ -13,7 +13,7 @@ e expostas por sensores próprios, também aqui.
 
 Nomes seguem `xmeas.<local>.<grandeza>`, onde `<local>` é a STREAM FÍSICA do TEP (não o índice da
 XMEAS) pras medições de vazão sem unidade própria, ou o nome do vaso pras medições locais —
-verificado contra o cabeçalho de `docs/fortran-original/teprob.f:122-143`.
+verificado contra o cabeçalho de `docs/fortran-original/teprob.f:111-132`.
 
 Cada XMEAS tem ruído gaussiano com o desvio padrão de Downs & Vogel (`XNS` de `teprob.f`,
 tabela em `docs/06-ruidos.md`), declarado no próprio atributo: `#[monjolo::sensor(key = "...",
