@@ -13,6 +13,20 @@
       "terminal": "console"
     },
     {
+      "name": "tep-plant: modo função (HTTP em 127.0.0.1:8091)",
+      "type": "lldb",
+      "request": "launch",
+      "cargo": {
+        "args": ["build", "--bin=tep-plant", "--features=function"]
+      },
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "MONJOLO_MODE": "function"
+      },
+      "terminal": "console"
+    },
+    {
       "name": "Planta: 1x (tempo real, 3.6 s/step)",
       "type": "lldb",
       "request": "launch",
